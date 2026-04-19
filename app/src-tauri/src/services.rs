@@ -6,16 +6,17 @@
 // ("service-log"), and tracks their lifecycle state via "service-status"
 // events. Kills all children on app shutdown.
 //
-// Design notes:
-//   • One thread per service reads stdout; one thread reads stderr.
-//   • Children are stored in a Mutex<HashMap<String, Child>> so the Tauri
-//     commands (restart_service, stop_service) can reach them.
-//   • When a child exits unexpectedly we emit state='exited' with the code.
+// Late-frontend-join safety:
+//   In Tauri v2 the Rust side can fire `emit` events before the webview has
+//   had a chance to `listen`. To avoid losing early output we also KEEP a
+//   rolling buffer of the last N log lines per service and the latest status.
+//   The frontend calls `get_state` on mount to catch up, then listens to new
+//   events as usual.
 // ──────────────────────────────────────────────────────────────────────────────
 
 use chrono::Utc;
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -23,7 +24,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
-#[derive(Clone, Serialize)]
+const LOG_BUFFER_PER_SERVICE: usize = 500;
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ServiceLogEvent {
     pub service: String,
     pub stream: String, // "stdout" | "stderr"
@@ -31,7 +34,7 @@ pub struct ServiceLogEvent {
     pub ts: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ServiceStatusEvent {
     pub service: String,
     pub state: String, // "starting" | "running" | "exited" | "failed"
@@ -40,13 +43,18 @@ pub struct ServiceStatusEvent {
     pub http_url: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct InitialState {
+    pub statuses: Vec<ServiceStatusEvent>,
+    pub logs: Vec<ServiceLogEvent>,
+    pub repo_root: String,
+}
+
 #[derive(Clone)]
 pub struct ServiceDef {
     pub name: &'static str,
     pub args: Vec<&'static str>,
     pub http_url: Option<&'static str>,
-    // A substring we scan for in stdout to decide the service is actually READY
-    // (listening on its port). Until we see it, status stays "starting".
     pub ready_marker: &'static str,
 }
 
@@ -81,54 +89,94 @@ pub fn service_definitions() -> Vec<ServiceDef> {
 
 pub struct Supervisor {
     pub children: Mutex<HashMap<String, Child>>,
+    pub statuses: Mutex<HashMap<String, ServiceStatusEvent>>,
+    pub log_buffer: Mutex<HashMap<String, VecDeque<ServiceLogEvent>>>,
     pub repo_root: PathBuf,
+    pub npm_path: PathBuf,
     pub defs: Vec<ServiceDef>,
+    pub started: Mutex<bool>,
 }
 
 impl Supervisor {
     pub fn new(repo_root: PathBuf) -> Arc<Self> {
+        let npm_path = resolve_npm_path();
+        let defs = service_definitions();
+
+        let mut statuses = HashMap::new();
+        let mut log_buffer = HashMap::new();
+        for d in &defs {
+            statuses.insert(
+                d.name.to_string(),
+                ServiceStatusEvent {
+                    service: d.name.to_string(),
+                    state: "starting".to_string(),
+                    pid: None,
+                    exit_code: None,
+                    http_url: d.http_url.map(|s| s.to_string()),
+                },
+            );
+            log_buffer.insert(d.name.to_string(), VecDeque::with_capacity(LOG_BUFFER_PER_SERVICE));
+        }
+
         Arc::new(Self {
             children: Mutex::new(HashMap::new()),
+            statuses: Mutex::new(statuses),
+            log_buffer: Mutex::new(log_buffer),
             repo_root,
-            defs: service_definitions(),
+            npm_path,
+            defs,
+            started: Mutex::new(false),
         })
     }
 
-    pub fn start_all(self: &Arc<Self>, app: &AppHandle) {
+    pub fn start_all_once(self: &Arc<Self>, app: &AppHandle) {
+        {
+            let mut guard = self.started.lock().unwrap();
+            if *guard {
+                return;
+            }
+            *guard = true;
+        }
+        self.record_log(app, "supervisor", "stdout", &format!(
+            "Supervisor bootstrap — npm: {}  cwd: {}",
+            self.npm_path.display(),
+            self.repo_root.display()
+        ));
         for def in self.defs.clone() {
             self.start_one(app, &def);
         }
     }
 
     pub fn start_one(self: &Arc<Self>, app: &AppHandle, def: &ServiceDef) {
-        emit_status(app, def.name, "starting", None, None, def.http_url);
+        self.update_status(app, def.name, "starting", None, None, def.http_url);
 
-        let mut cmd = Command::new("npm");
+        let mut cmd = Command::new(&self.npm_path);
         cmd.args(&def.args)
             .current_dir(&self.repo_root)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env("FORCE_COLOR", "0"); // prevent ANSI escapes in logs
+            .env("FORCE_COLOR", "0")
+            .env("CI", "1"); // make some tools less chatty / non-interactive
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                emit_log(
+                self.record_log(
                     app,
                     def.name,
                     "stderr",
-                    &format!("Failed to spawn: {}", e),
+                    &format!("Failed to spawn ({} {:?}): {}", self.npm_path.display(), def.args, e),
                 );
-                emit_status(app, def.name, "failed", None, None, def.http_url);
+                self.update_status(app, def.name, "failed", None, None, def.http_url);
                 return;
             }
         };
         let pid = child.id();
-        emit_log(
+        self.record_log(
             app,
             def.name,
             "stdout",
-            &format!("Spawned pid {} — cmd: npm {}", pid, def.args.join(" ")),
+            &format!("Spawned pid {} — {} {}", pid, self.npm_path.display(), def.args.join(" ")),
         );
 
         let stdout = child.stdout.take();
@@ -139,45 +187,40 @@ impl Supervisor {
         let ready_marker = def.ready_marker;
         let http_url = def.http_url;
 
-        // stdout reader — watches for ready_marker to flip state to "running".
         if let Some(out) = stdout {
+            let this = self.clone();
             let app2 = app.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(out);
                 let mut announced_running = false;
                 for line in reader.lines().flatten() {
-                    emit_log(&app2, name, "stdout", &line);
+                    this.record_log(&app2, name, "stdout", &line);
                     if !announced_running && line.contains(ready_marker) {
-                        emit_status(&app2, name, "running", Some(pid), None, http_url);
+                        this.update_status(&app2, name, "running", Some(pid), None, http_url);
                         announced_running = true;
                     }
-                }
-                // stdout closed → usually means the process exited. We mark
-                // "running" false only if we never saw ready.
-                if !announced_running {
-                    emit_status(&app2, name, "exited", Some(pid), None, http_url);
                 }
             });
         }
 
         if let Some(err) = stderr {
+            let this = self.clone();
             let app3 = app.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(err);
                 for line in reader.lines().flatten() {
-                    emit_log(&app3, name, "stderr", &line);
+                    this.record_log(&app3, name, "stderr", &line);
                 }
             });
         }
 
-        // Exit watcher — waits for process to finish, emits final status.
-        let sup = self.clone();
+        // Exit watcher.
+        let this = self.clone();
         let app4 = app.clone();
         let key = def.name.to_string();
         let http_url_owned = http_url;
         thread::spawn(move || {
-            // Wait() consumes the Child, so we take it OUT of the map first.
-            let mut child = match sup.children.lock().unwrap().remove(&key) {
+            let mut child = match this.children.lock().unwrap().remove(&key) {
                 Some(c) => c,
                 None => return,
             };
@@ -187,7 +230,7 @@ impl Supervisor {
                 Some(0) => "exited",
                 _ => "failed",
             };
-            emit_status(&app4, &key, state, Some(pid), code, http_url_owned);
+            this.update_status(&app4, &key, state, Some(pid), code, http_url_owned);
         });
     }
 
@@ -211,48 +254,110 @@ impl Supervisor {
     pub fn def_for(&self, name: &str) -> Option<&ServiceDef> {
         self.defs.iter().find(|d| d.name == name)
     }
-}
 
-fn emit_log(app: &AppHandle, service: &str, stream: &str, line: &str) {
-    let _ = app.emit(
-        "service-log",
-        ServiceLogEvent {
+    pub fn snapshot(&self) -> InitialState {
+        let statuses = self
+            .statuses
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut logs: Vec<ServiceLogEvent> = self
+            .log_buffer
+            .lock()
+            .unwrap()
+            .values()
+            .flat_map(|v| v.iter().cloned().collect::<Vec<_>>())
+            .collect();
+        logs.sort_by(|a, b| a.ts.cmp(&b.ts));
+        InitialState {
+            statuses,
+            logs,
+            repo_root: self.repo_root.display().to_string(),
+        }
+    }
+
+    // ── Internal helpers — always update cache THEN emit ──────────────────────
+
+    fn record_log(&self, app: &AppHandle, service: &str, stream: &str, line: &str) {
+        let event = ServiceLogEvent {
             service: service.to_string(),
             stream: stream.to_string(),
             line: line.to_string(),
             ts: Utc::now().to_rfc3339(),
-        },
-    );
-}
+        };
+        {
+            let mut buf = self.log_buffer.lock().unwrap();
+            let q = buf.entry(service.to_string()).or_insert_with(VecDeque::new);
+            if q.len() >= LOG_BUFFER_PER_SERVICE {
+                q.pop_front();
+            }
+            q.push_back(event.clone());
+        }
+        let _ = app.emit("service-log", event);
+    }
 
-fn emit_status(
-    app: &AppHandle,
-    service: &str,
-    state: &str,
-    pid: Option<u32>,
-    exit_code: Option<i32>,
-    http_url: Option<&str>,
-) {
-    let _ = app.emit(
-        "service-status",
-        ServiceStatusEvent {
+    fn update_status(
+        &self,
+        app: &AppHandle,
+        service: &str,
+        state: &str,
+        pid: Option<u32>,
+        exit_code: Option<i32>,
+        http_url: Option<&str>,
+    ) {
+        let event = ServiceStatusEvent {
             service: service.to_string(),
             state: state.to_string(),
             pid,
             exit_code,
             http_url: http_url.map(|s| s.to_string()),
-        },
-    );
+        };
+        self.statuses
+            .lock()
+            .unwrap()
+            .insert(service.to_string(), event.clone());
+        let _ = app.emit("service-status", event);
+    }
 }
 
-/// Attempt to locate the Vinted-System repo root so the services can be
-/// launched with the correct CWD.
-///
-/// Search order (first hit wins):
-///   1. `$VINTED_SYSTEM_ROOT` env var.
-///   2. Walking up from the executable's directory looking for a
-///      `package.json` containing `"name": "vinted-system"`.
-///   3. `$CARGO_MANIFEST_DIR/../..` (dev mode).
+/// Resolve an absolute path to `npm`.
+/// GUI-launched macOS apps don't inherit the login-shell PATH, so relying on
+/// `Command::new("npm")` alone can fail once we bundle to a .app. Try common
+/// locations and fall back to the bare name.
+fn resolve_npm_path() -> PathBuf {
+    if let Ok(v) = std::env::var("VINTED_SYSTEM_NPM") {
+        let p = PathBuf::from(v);
+        if p.exists() {
+            return p;
+        }
+    }
+    let candidates = [
+        "/opt/homebrew/bin/npm",
+        "/usr/local/bin/npm",
+        "/usr/bin/npm",
+        "/opt/homebrew/opt/node/bin/npm",
+    ];
+    for c in candidates {
+        let p = PathBuf::from(c);
+        if p.exists() {
+            return p;
+        }
+    }
+    // Try which.
+    if let Ok(out) = Command::new("/bin/sh").arg("-lc").arg("which npm").output() {
+        if out.status.success() {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() {
+                return PathBuf::from(path);
+            }
+        }
+    }
+    PathBuf::from("npm")
+}
+
+/// Attempt to locate the Vinted-System repo root.
 pub fn find_repo_root() -> Option<PathBuf> {
     if let Ok(env) = std::env::var("VINTED_SYSTEM_ROOT") {
         let p = PathBuf::from(env);
@@ -260,7 +365,6 @@ pub fn find_repo_root() -> Option<PathBuf> {
             return Some(p);
         }
     }
-
     if let Ok(exe) = std::env::current_exe() {
         let mut cur = exe.parent()?.to_path_buf();
         for _ in 0..8 {
@@ -273,15 +377,12 @@ pub fn find_repo_root() -> Option<PathBuf> {
             };
         }
     }
-
-    // Dev fallback — CARGO_MANIFEST_DIR is app/src-tauri, root is ../..
     if let Some(manifest) = option_env!("CARGO_MANIFEST_DIR") {
         let dev = Path::new(manifest).join("..").join("..");
         if is_repo_root(&dev) {
             return Some(dev.canonicalize().ok()?);
         }
     }
-
     None
 }
 

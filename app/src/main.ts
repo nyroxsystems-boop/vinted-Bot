@@ -1,16 +1,16 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Services-Konsole Frontend
 //
-// Listens for Rust-side service lifecycle events and renders:
-//   • sidebar with per-service status dots
-//   • main panel with live log stream for the selected service
-//   • buttons: restart all, open dashboard, clear / filter logs
+// On mount:
+//   1. Register listeners for live "service-status" / "service-log" events.
+//   2. Invoke `frontend_ready` — Rust starts all services + returns snapshot.
+//   3. Apply snapshot to local state (so we never miss early output).
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
-type ServiceName = 'orchestrator' | 'vinted-bot' | 'temu-bot' | 'dashboard';
+type ServiceName = 'orchestrator' | 'vinted-bot' | 'temu-bot' | 'dashboard' | 'supervisor';
 type ServiceState = 'starting' | 'running' | 'exited' | 'failed';
 
 interface StatusPayload {
@@ -18,7 +18,7 @@ interface StatusPayload {
   state: ServiceState;
   pid: number | null;
   exit_code: number | null;
-  http_url?: string | null;
+  http_url: string | null;
 }
 
 interface LogPayload {
@@ -28,7 +28,13 @@ interface LogPayload {
   ts: string;
 }
 
-interface ServiceState_ {
+interface InitialState {
+  statuses: StatusPayload[];
+  logs: LogPayload[];
+  repo_root: string;
+}
+
+interface ServiceLocal {
   name: ServiceName;
   state: ServiceState;
   pid: number | null;
@@ -40,17 +46,22 @@ interface ServiceState_ {
 const SERVICES: ServiceName[] = ['orchestrator', 'vinted-bot', 'temu-bot', 'dashboard'];
 const MAX_LOG_LINES = 2000;
 
-const state: Record<ServiceName, ServiceState_> = Object.fromEntries(
-  SERVICES.map((s) => [
-    s,
-    { name: s, state: 'starting', pid: null, exitCode: null, httpUrl: null, logs: [] } as ServiceState_,
-  ]),
-) as unknown as Record<ServiceName, ServiceState_>;
+const state: Record<ServiceName, ServiceLocal> = {} as Record<ServiceName, ServiceLocal>;
+for (const s of [...SERVICES, 'supervisor' as ServiceName]) {
+  state[s] = {
+    name: s,
+    state: 'starting',
+    pid: null,
+    exitCode: null,
+    httpUrl: null,
+    logs: [],
+  };
+}
 
 let activeService: ServiceName | 'all' = 'all';
 let filterErrorsOnly = false;
 
-// ── DOM ───────────────────────────────────────────────────────────────────────
+// ── DOM ──────────────────────────────────────────────────────────────────────
 const $services = document.getElementById('services')!;
 const $logs = document.getElementById('logs')!;
 const $logsTitle = document.getElementById('logs-title')!;
@@ -61,11 +72,20 @@ const $btnFilterAll = document.getElementById('btn-filter-all') as HTMLButtonEle
 const $btnFilterErr = document.getElementById('btn-filter-err') as HTMLButtonElement;
 const $btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
 
-// ── Rendering ─────────────────────────────────────────────────────────────────
+// ── Rendering ────────────────────────────────────────────────────────────────
+function aggregateAllDot(): ServiceState {
+  const s = SERVICES.map((n) => state[n].state);
+  if (s.every((x) => x === 'running')) return 'running';
+  if (s.some((x) => x === 'failed')) return 'failed';
+  if (s.some((x) => x === 'starting')) return 'starting';
+  return 'exited';
+}
+
 function renderServices(): void {
+  const allDot = aggregateAllDot();
   const rows = [
-    { key: 'all' as const, label: 'Alle Services' },
-    ...SERVICES.map((s) => ({ key: s, label: s })),
+    { key: 'all' as const, label: 'Alle Services', dot: allDot, meta: '' },
+    ...SERVICES.map((s) => ({ key: s, label: s, dot: state[s].state, meta: '' })),
   ];
   $services.innerHTML = rows
     .map((r) => {
@@ -73,19 +93,18 @@ function renderServices(): void {
         const running = SERVICES.filter((s) => state[s].state === 'running').length;
         return `
           <div class="service ${activeService === 'all' ? 'active' : ''}" data-service="all">
-            <div class="title"><span class="dot running"></span> ${r.label}</div>
+            <div class="title"><span class="dot ${r.dot}"></span> ${r.label}</div>
             <div class="meta">${running}/${SERVICES.length} laufen</div>
           </div>`;
       }
       const s = state[r.key as ServiceName];
-      const stateCls = s.state;
       return `
         <div class="service ${activeService === r.key ? 'active' : ''}" data-service="${r.key}">
-          <div class="title"><span class="dot ${stateCls}"></span> ${r.label}</div>
+          <div class="title"><span class="dot ${s.state}"></span> ${r.label}</div>
           <div class="meta">
             ${s.state}
             ${s.pid ? ` · pid ${s.pid}` : ''}
-            ${s.httpUrl ? ` · <a href="${s.httpUrl}" target="_blank" style="color:inherit">${s.httpUrl.replace(/^https?:\/\//, '')}</a>` : ''}
+            ${s.httpUrl ? ` · ${s.httpUrl.replace(/^https?:\/\//, '')}` : ''}
             ${s.exitCode !== null ? ` · exit ${s.exitCode}` : ''}
           </div>
         </div>`;
@@ -102,18 +121,24 @@ function renderServices(): void {
 }
 
 function renderLogs(): void {
-  $logsTitle.textContent = activeService === 'all' ? 'Alle Logs' : `Logs: ${activeService}`;
+  $logsTitle.textContent =
+    activeService === 'all' ? 'Alle Logs' : `Logs: ${activeService}`;
+
   const all: LogPayload[] =
     activeService === 'all'
-      ? SERVICES.flatMap((s) => state[s].logs).sort((a, b) => a.ts.localeCompare(b.ts))
+      ? [...SERVICES, 'supervisor' as ServiceName]
+          .flatMap((s) => state[s].logs)
+          .sort((a, b) => a.ts.localeCompare(b.ts))
       : state[activeService as ServiceName].logs;
 
   const filtered = filterErrorsOnly
-    ? all.filter((l) => l.stream === 'stderr' || /error|exception|failed|warn/i.test(l.line))
+    ? all.filter(
+        (l) => l.stream === 'stderr' || /error|exception|failed|warn/i.test(l.line),
+      )
     : all;
 
   if (filtered.length === 0) {
-    $logs.innerHTML = '<div class="empty">Keine Logs (noch).</div>';
+    $logs.innerHTML = '<div class="empty">Warte auf Log-Output…</div>';
     return;
   }
 
@@ -136,20 +161,36 @@ function renderSummary(): void {
   const parts: string[] = [`${running}/${SERVICES.length} laufen`];
   if (failed > 0) parts.push(`${failed} fehlgeschlagen`);
   $summary.textContent = parts.join(' · ');
-  $btnDashboard.disabled = running < 2; // orchestrator + dashboard minimum
+  $btnDashboard.disabled = running < 2;
+}
+
+function applyStatus(p: StatusPayload): void {
+  const s = state[p.service];
+  if (!s) return;
+  s.state = p.state;
+  s.pid = p.pid;
+  s.exitCode = p.exit_code;
+  if (p.http_url !== undefined) s.httpUrl = p.http_url;
+}
+
+function applyLog(l: LogPayload): void {
+  const s = state[l.service];
+  if (!s) return;
+  s.logs.push(l);
+  if (s.logs.length > MAX_LOG_LINES * 2) {
+    s.logs.splice(0, s.logs.length - MAX_LOG_LINES);
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function nearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
-
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c] ?? c));
 }
-
 function detectLevel(l: LogPayload): string {
   if (l.stream === 'stderr') return 'stderr';
   if (/\berror\b/i.test(l.line)) return 'error';
@@ -160,21 +201,13 @@ function detectLevel(l: LogPayload): string {
 
 // ── Events from Rust ─────────────────────────────────────────────────────────
 listen<StatusPayload>('service-status', (e) => {
-  const p = e.payload;
-  const s = state[p.service];
-  s.state = p.state;
-  s.pid = p.pid;
-  s.exitCode = p.exit_code;
-  if (p.http_url !== undefined) s.httpUrl = p.http_url;
+  applyStatus(e.payload);
   renderServices();
   renderSummary();
 });
 
 listen<LogPayload>('service-log', (e) => {
-  const s = state[e.payload.service];
-  if (!s) return;
-  s.logs.push(e.payload);
-  if (s.logs.length > MAX_LOG_LINES * 2) s.logs.splice(0, s.logs.length - MAX_LOG_LINES);
+  applyLog(e.payload);
   if (activeService === 'all' || activeService === e.payload.service) {
     renderLogs();
   }
@@ -203,11 +236,34 @@ $btnFilterErr.addEventListener('click', () => {
   renderLogs();
 });
 $btnClear.addEventListener('click', () => {
-  if (activeService === 'all') SERVICES.forEach((s) => (state[s].logs = []));
-  else state[activeService as ServiceName].logs = [];
+  if (activeService === 'all') {
+    [...SERVICES, 'supervisor' as ServiceName].forEach((s) => (state[s].logs = []));
+  } else {
+    state[activeService as ServiceName].logs = [];
+  }
   renderLogs();
 });
 
-// Initial render.
+// ── Bootstrap ────────────────────────────────────────────────────────────────
 renderServices();
 renderSummary();
+
+(async () => {
+  try {
+    // Tell Rust we're mounted and listening; Rust will start services + return
+    // the snapshot we might have otherwise missed (no events lost to race).
+    const snap = await invoke<InitialState>('frontend_ready');
+    snap.statuses.forEach(applyStatus);
+    snap.logs.forEach(applyLog);
+    renderServices();
+    renderSummary();
+    renderLogs();
+  } catch (e) {
+    console.error('frontend_ready failed', e);
+    // Still show something so the UI isn't frozen on "starting".
+    const el = document.createElement('div');
+    el.style.cssText = 'padding:20px;color:#fca5a5';
+    el.textContent = `Rust-Seite nicht erreichbar: ${e}`;
+    document.body.prepend(el);
+  }
+})();
