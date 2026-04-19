@@ -1,0 +1,81 @@
+import express, { type Request, type Response } from 'express';
+import { createLogger, startBotRun, finishBotRun, isPaused } from '@vinted-system/shared';
+import { temuQueue } from './queue.js';
+import { addBatchToCart, buildOpenBatch } from './order/cart.js';
+import { pollTemuOrders } from './track/status.js';
+
+const log = createLogger('temu-api');
+
+export function createTemuApi(): express.Express {
+  const app = express();
+  app.use(express.json({ limit: '1mb' }));
+
+  app.get('/status', (_req, res) => {
+    res.json({ bot: 'temu', queue: temuQueue.stats() });
+  });
+
+  app.post('/circuit-breaker/reset', (_req, res) => {
+    temuQueue.resetCircuitBreaker();
+    res.json({ ok: true });
+  });
+
+  // ── Batch-cart endpoints ────────────────────────────────────────────────
+  // POST /batches — create a new "open" batch collecting paid sales from
+  //                 the last N hours that aren't already in a batch.
+  //                 Body: { windowHours: number }
+  app.post('/batches', (req: Request, res: Response) => {
+    if (isPaused()) {
+      return res.status(409).json({ ok: false, error: 'System is paused' });
+    }
+    const { windowHours } = req.body as { windowHours?: number };
+    const w = Number.isFinite(windowHours) ? Math.max(1, Math.min(168, windowHours!)) : 24;
+    try {
+      const result = buildOpenBatch(w);
+      res.status(201).json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // POST /batches/:id/add — kick off the actual add-to-cart run for the
+  //                         given batch. Blocks until all items processed.
+  app.post('/batches/:id/add', async (req, res) => {
+    if (isPaused()) {
+      return res.status(409).json({ ok: false, error: 'System is paused' });
+    }
+    const batchId = Number.parseInt(req.params.id, 10);
+    const runId = startBotRun('temu', 'add_batch_to_cart');
+    try {
+      const result = await temuQueue.enqueue(
+        () => addBatchToCart({ batchId }),
+        `add_batch_${batchId}`,
+      );
+      finishBotRun(runId, result.ok ? 'success' : 'failure', result.error);
+      res.json(result);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      finishBotRun(runId, 'failure', error);
+      res.status(500).json({ ok: false, error });
+    }
+  });
+
+  app.post('/poll/orders', async (_req, res) => {
+    const runId = startBotRun('temu', 'poll_orders');
+    try {
+      const result = await temuQueue.enqueue(() => pollTemuOrders(), 'poll_orders');
+      finishBotRun(runId, 'success');
+      res.json({ ok: true, result });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      finishBotRun(runId, 'failure', error);
+      res.status(500).json({ ok: false, error });
+    }
+  });
+
+  app.use((err: Error, _req: Request, res: Response, _next: express.NextFunction) => {
+    log.error('Unhandled API error', { error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
+  });
+
+  return app;
+}

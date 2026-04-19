@@ -1,0 +1,31 @@
+{
+  "name": "@vinted-system/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./db": "./src/db.ts",
+    "./types": "./src/types.ts",
+    "./logger": "./src/logger.ts",
+    "./events": "./src/events.ts"
+  },
+  "scripts": {
+    "migrate": "tsx src/migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.57.0",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.12.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.4.5"
+  }
+}

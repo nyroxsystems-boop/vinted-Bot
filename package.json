@@ -1,0 +1,34 @@
+{
+  "name": "vinted-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "vinted-bot",
+    "temu-bot",
+    "orchestrator",
+    "dashboard"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "install:all": "npm install && npx playwright install chromium",
+    "db:migrate": "npm run -w @vinted-system/shared migrate",
+    "vinted:login": "npm run -w @vinted-system/vinted-bot login",
+    "temu:login": "npm run -w @vinted-system/temu-bot login",
+    "dev:orchestrator": "npm run -w @vinted-system/orchestrator dev",
+    "dev:vinted": "npm run -w @vinted-system/vinted-bot dev",
+    "dev:temu": "npm run -w @vinted-system/temu-bot dev",
+    "dev:dashboard": "npm run -w @vinted-system/dashboard dev",
+    "dev": "concurrently -n orch,vinted,temu,ui -c blue,green,magenta,cyan \"npm:dev:orchestrator\" \"npm:dev:vinted\" \"npm:dev:temu\" \"npm:dev:dashboard\"",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "typescript": "^5.4.5"
+  }
+}
