@@ -72,22 +72,56 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
     log.info(`Found ${conversations.length} conversations in sidebar`);
 
     if (conversations.length === 0) {
-      // Diagnostics: dump page state so we can see what went wrong.
+      // Diagnostics: dump page state + a sample of the actual buttons so we
+      // can see what Vinted is rendering and tighten the selector.
       const url = page.url();
       const title = await page.title().catch(() => '');
-      const mainHtmlLen = await page
-        .locator('main')
-        .first()
-        .innerHTML()
-        .then((h) => h.length)
-        .catch(() => 0);
+      const mainHtmlLen = await page.locator('main').first().innerHTML()
+        .then((h) => h.length).catch(() => 0);
       const buttonCount = await page.locator('main button').count().catch(() => 0);
+
+      // Sample first 3 buttons — their outer-HTML tells us EXACTLY what
+      // pattern to match.
+      const samples: string[] = [];
+      for (let i = 0; i < Math.min(3, buttonCount); i++) {
+        const html = await page.locator('main button').nth(i).evaluate((el) => el.outerHTML)
+          .catch(() => '');
+        samples.push(html.slice(0, 260));
+      }
       log.warn('Diagnostic — empty inbox scrape', {
         url,
         title,
         mainHtmlLen,
         buttonCount,
+        buttonSamples: samples,
       });
+
+      // Force-navigate to /inbox if Vinted redirected us into a specific
+      // conversation. The sidebar CAN render on /inbox/{id} too, but the
+      // reliable starting point is bare /inbox.
+      if (/\/inbox\/\d+/.test(url)) {
+        log.info('Redirected into conversation — forcing goto /inbox and retrying');
+        await page.goto(`${BASE_URL}${VINTED.inboxUrl}`, { waitUntil: 'networkidle', timeout: 20_000 }).catch(() => null);
+        const retry = await discoverConversations(page);
+        if (retry.length > 0) {
+          log.info(`Retry found ${retry.length} conversations`);
+          for (const conv of retry) {
+            const chatId = upsertChat(conv);
+            const messages = await scrapeConversationMessages(page, conv.conversationId);
+            for (const msg of messages) {
+              const parsed = parseMessageText(msg.body);
+              const inserted = insertMessageIfNew(chatId, msg, parsed);
+              if (inserted) {
+                newMessages++;
+                if (parsed.isOffer && parsed.offerAmountEur !== null) {
+                  createPendingOffer(chatId, parsed.offerAmountEur);
+                  newOffers++;
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     for (const conv of conversations) {

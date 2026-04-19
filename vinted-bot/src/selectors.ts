@@ -79,12 +79,14 @@ export const VINTED = {
   // an href — the conversation id is only available after the click lands
   // on /inbox/{id}. Scrape the id from `page.url()` after click.
   //
-  // The most reliable pattern (verified April 2026) is a <button> inside <main>
-  // that contains an avatar image (img[alt=username]) and is NOT the
-  // category/nav tab bar.
+  // NOTE: Vinted's <img> tags in the sidebar frequently don't carry an `alt`
+  // attribute, so selectors requiring [alt] returned zero matches. A simple
+  // `:has(img)` matches avatars AND product thumbnails; we then filter at
+  // runtime (conversation buttons contain text after the img, product
+  // thumbnails don't).
   conversationListItem: [
     '[data-testid^="conversation-list-item"]',
-    'main button:has(img[alt]):not([role="tab"])',
+    'main button:has(img):not([role="tab"]):not([aria-label*="Information" i])',
   ].join(', '),
 
   // Within a conversation-list-item button, the first inner `generic`
