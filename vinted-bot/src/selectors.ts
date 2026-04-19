@@ -78,9 +78,13 @@ export const VINTED = {
   // IMPORTANT: these are <button> elements, NOT anchors. They do not expose
   // an href — the conversation id is only available after the click lands
   // on /inbox/{id}. Scrape the id from `page.url()` after click.
+  //
+  // The most reliable pattern (verified April 2026) is a <button> inside <main>
+  // that contains an avatar image (img[alt=username]) and is NOT the
+  // category/nav tab bar.
   conversationListItem: [
     '[data-testid^="conversation-list-item"]',
-    'main button:has(img):has-text(".")',         // button containing img + any text
+    'main button:has(img[alt]):not([role="tab"])',
   ].join(', '),
 
   // Within a conversation-list-item button, the first inner `generic`

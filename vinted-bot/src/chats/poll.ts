@@ -55,8 +55,40 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
       return { newMessages: 0, newOffers: 0 };
     }
 
+    // Wait for React to hydrate the conversation list. Vinted is Next.js
+    // App Router + RSC — domcontentloaded fires BEFORE any React content
+    // is in the DOM. Without this wait, headless poll would always scrape
+    // 0 conversations (false negatives). Use `networkidle` + an explicit
+    // selector wait so we don't scrape too early.
+    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {
+      log.warn('networkidle not reached within 20s — trying anyway');
+    });
+    const firstButton = page.locator('main button:has(img)').first();
+    await firstButton.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {
+      log.warn('No conversation-list buttons appeared within 15s');
+    });
+
     const conversations = await discoverConversations(page);
     log.info(`Found ${conversations.length} conversations in sidebar`);
+
+    if (conversations.length === 0) {
+      // Diagnostics: dump page state so we can see what went wrong.
+      const url = page.url();
+      const title = await page.title().catch(() => '');
+      const mainHtmlLen = await page
+        .locator('main')
+        .first()
+        .innerHTML()
+        .then((h) => h.length)
+        .catch(() => 0);
+      const buttonCount = await page.locator('main button').count().catch(() => 0);
+      log.warn('Diagnostic — empty inbox scrape', {
+        url,
+        title,
+        mainHtmlLen,
+        buttonCount,
+      });
+    }
 
     for (const conv of conversations) {
       const chatId = upsertChat(conv);
