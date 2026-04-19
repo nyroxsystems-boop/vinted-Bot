@@ -1,0 +1,28 @@
+[package]
+name = "vinted-system-app"
+version = "0.1.0"
+description = "Vinted-System: lokale Mac-App mit Services-Konsole"
+authors = ["nyroxsystems-boop"]
+edition = "2021"
+
+[lib]
+name = "vinted_system_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+incremental = false
+opt-level = "s"
+strip = true

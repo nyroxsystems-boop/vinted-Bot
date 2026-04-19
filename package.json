@@ -8,7 +8,8 @@
     "vinted-bot",
     "temu-bot",
     "orchestrator",
-    "dashboard"
+    "dashboard",
+    "app"
   ],
   "engines": {
     "node": ">=20.0.0",
@@ -24,6 +25,8 @@
     "dev:temu": "npm run -w @vinted-system/temu-bot dev",
     "dev:dashboard": "npm run -w @vinted-system/dashboard dev",
     "dev": "concurrently -n orch,vinted,temu,ui -c blue,green,magenta,cyan \"npm:dev:orchestrator\" \"npm:dev:vinted\" \"npm:dev:temu\" \"npm:dev:dashboard\"",
+    "app:dev": "npm run -w @vinted-system/app tauri:dev",
+    "app:build": "npm run -w @vinted-system/app tauri:build",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

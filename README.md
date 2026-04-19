@@ -71,6 +71,33 @@ Sessions landen in:
 
 ## Start
 
+### Variante A: Native Mac-App (empfohlen)
+
+Eine Tauri-App mit Services-Konsole + Dashboard in zwei nativen Fenstern:
+
+```bash
+npm run app:dev
+```
+
+Was passiert:
+1. Tauri startet → öffnet **Services-Konsole-Fenster** (dunkles UI, Live-Logs je Service)
+2. Supervisor spawnt orchestrator, vinted-bot, temu-bot, dashboard als Child-Prozesse
+3. Logs + Status-Dots sind live sichtbar pro Service
+4. Klick auf **„Dashboard öffnen"** → zweites Fenster mit der React-UI
+5. App schließen → alle 4 Services werden sauber beendet
+
+Für einen bundled `.app` zum Draggen nach /Programme:
+
+```bash
+npm run app:build
+# Output: app/src-tauri/target/release/bundle/dmg/Vinted-System_0.1.0_aarch64.dmg
+#         app/src-tauri/target/release/bundle/macos/Vinted-System.app
+```
+
+Die `.app` braucht die `Vinted-System/`-Repo-Ordner auf der Platte (für `npm run` der Services). Setze `VINTED_SYSTEM_ROOT=/absoluter/pfad` als Env-Var falls die Auto-Erkennung scheitert.
+
+### Variante B: Ohne App, nur Terminal
+
 Alle 4 Services auf einmal (Orchestrator + Bots + Dashboard):
 
 ```bash

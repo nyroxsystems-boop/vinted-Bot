@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vinted-System",
+  "version": "0.1.0",
+  "identifier": "de.nyroxsystems.vinted-system",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vinted-System · Services",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true,
+        "decorations": true,
+        "shadow": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://localhost:* http://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "DeveloperTool",
+    "shortDescription": "Vinted-System lokaler Bot-Stack",
+    "longDescription": "Lokaler Bot + Dashboard für Vinted-Verkäufe mit Batch-Cart-Fulfillment über Temu.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ]
+  }
+}

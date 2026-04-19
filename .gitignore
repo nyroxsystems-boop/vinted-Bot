@@ -1,6 +1,9 @@
 node_modules/
 dist/
 build/
+# Rust / Tauri build artefacts
+app/src-tauri/target/
+app/src-tauri/gen/
 .env
 .env.local
 *.log
