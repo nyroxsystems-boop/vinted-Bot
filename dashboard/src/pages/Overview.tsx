@@ -9,17 +9,22 @@ import {
   Play,
   ShoppingCart,
   TrendingUp,
+  KeyRound,
 } from 'lucide-react';
 import { useStatus } from '../hooks/useStatus';
 import { useSettings } from '../hooks/useSettings';
 import { useDaily } from '../hooks/useAnalytics';
+import { useAuthStatus } from '../hooks/useAuth';
+import { anyBotNeedsLogin } from '../components/AuthPanel';
 
 export function OverviewPage() {
   const { data, error } = useStatus();
   const { settings, update } = useSettings();
   const { data: daily } = useDaily(14);
+  const { data: auth } = useAuthStatus(5000);
 
   const paused = settings.paused === 'true';
+  const loginNeeded = auth ? anyBotNeedsLogin(auth) : null;
 
   const totals = daily.reduce(
     (a, d) => ({ paid: a.paid + d.paid, revenue: a.revenue + d.revenue_eur }),
@@ -55,6 +60,26 @@ export function OverviewPage() {
       </div>
 
       {error && <div className="card text-red-600">{error}</div>}
+
+      {loginNeeded && (
+        <Link
+          to="/settings"
+          className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 hover:bg-amber-100"
+        >
+          <KeyRound size={18} />
+          <div className="flex-1">
+            <div className="font-semibold">Login benötigt</div>
+            <div className="text-xs">
+              {loginNeeded === 'both'
+                ? 'Vinted- und Temu-Session sind abgelaufen oder nie eingerichtet.'
+                : loginNeeded === 'vinted'
+                  ? 'Vinted-Session ist abgelaufen oder nie eingerichtet.'
+                  : 'Temu-Session ist abgelaufen oder nie eingerichtet.'}{' '}
+              → Einstellungen öffnen.
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* ── KPIs ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
+import { AuthPanel } from '../components/AuthPanel';
 
 export function SettingsPage() {
   const { settings, update, loading } = useSettings();
@@ -16,6 +17,8 @@ export function SettingsPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Einstellungen</h1>
+
+      <AuthPanel />
 
       <div className="card space-y-4">
         <Toggle

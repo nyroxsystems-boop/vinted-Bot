@@ -3,6 +3,12 @@ import { createLogger, startBotRun, finishBotRun, isPaused } from '@vinted-syste
 import { temuQueue } from './queue.js';
 import { addBatchToCart, buildOpenBatch } from './order/cart.js';
 import { pollTemuOrders } from './track/status.js';
+import {
+  startLogin,
+  getLoginFlowStatus,
+  isLoginInProgress,
+  temuSession,
+} from './login-flow.js';
 
 const log = createLogger('temu-api');
 
@@ -11,8 +17,36 @@ export function createTemuApi(): express.Express {
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/status', (_req, res) => {
-    res.json({ bot: 'temu', queue: temuQueue.stats() });
+    res.json({
+      bot: 'temu',
+      queue: temuQueue.stats(),
+      session: temuSession.snapshot(),
+      login: getLoginFlowStatus(),
+    });
   });
+
+  // Login flow endpoints.
+  app.post('/login/start', (_req, res) => {
+    if (isLoginInProgress()) {
+      return res.status(409).json({ ok: false, error: 'Login läuft bereits' });
+    }
+    startLogin().catch(() => {
+      /* error captured in flow status */
+    });
+    res.json({ ok: true, status: getLoginFlowStatus() });
+  });
+
+  app.get('/login/status', (_req, res) => {
+    res.json({ session: temuSession.snapshot(), login: getLoginFlowStatus() });
+  });
+
+  const rejectIfLogin = (res: Response): boolean => {
+    if (isLoginInProgress()) {
+      res.status(409).json({ ok: false, error: 'Login läuft — bitte warten' });
+      return true;
+    }
+    return false;
+  };
 
   app.post('/circuit-breaker/reset', (_req, res) => {
     temuQueue.resetCircuitBreaker();
@@ -43,6 +77,7 @@ export function createTemuApi(): express.Express {
     if (isPaused()) {
       return res.status(409).json({ ok: false, error: 'System is paused' });
     }
+    if (rejectIfLogin(res)) return;
     const batchId = Number.parseInt(req.params.id, 10);
     const runId = startBotRun('temu', 'add_batch_to_cart');
     try {
@@ -50,23 +85,28 @@ export function createTemuApi(): express.Express {
         () => addBatchToCart({ batchId }),
         `add_batch_${batchId}`,
       );
+      if (result.ok) temuSession.markValid();
       finishBotRun(runId, result.ok ? 'success' : 'failure', result.error);
       res.json(result);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      temuSession.handleError(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }
   });
 
   app.post('/poll/orders', async (_req, res) => {
+    if (rejectIfLogin(res)) return;
     const runId = startBotRun('temu', 'poll_orders');
     try {
       const result = await temuQueue.enqueue(() => pollTemuOrders(), 'poll_orders');
+      temuSession.markValid();
       finishBotRun(runId, 'success');
       res.json({ ok: true, result });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      temuSession.handleError(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }

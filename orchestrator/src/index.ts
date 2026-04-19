@@ -11,6 +11,7 @@ import { streamRouter } from './routes/stream.js';
 import { statusRouter } from './routes/status.js';
 import { fulfillmentRouter } from './routes/fulfillment.js';
 import { analyticsRouter } from './routes/analytics.js';
+import { authRouter } from './routes/auth.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
 
 const log = createLogger('orchestrator');
@@ -33,6 +34,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/status', statusRouter);
 app.use('/api/fulfillment', fulfillmentRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/auth', authRouter);
 app.use('/stream', streamRouter);
 
 const server = app.listen(PORT, () => {

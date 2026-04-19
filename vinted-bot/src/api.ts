@@ -6,6 +6,12 @@ import { pollVintedInbox } from './chats/poll.js';
 import { acceptOffer } from './offers/accept.js';
 import { declineOffer } from './offers/decline.js';
 import { pollSaleStatuses } from './sales/track.js';
+import {
+  startLogin,
+  getLoginFlowStatus,
+  isLoginInProgress,
+  vintedSession,
+} from './login-flow.js';
 
 const log = createLogger('vinted-api');
 
@@ -14,7 +20,27 @@ export function createVintedApi(): express.Express {
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/status', (_req: Request, res: Response) => {
-    res.json({ bot: 'vinted', queue: vintedQueue.stats() });
+    res.json({
+      bot: 'vinted',
+      queue: vintedQueue.stats(),
+      session: vintedSession.snapshot(),
+      login: getLoginFlowStatus(),
+    });
+  });
+
+  // Login-Flow endpoints.
+  app.post('/login/start', (_req, res) => {
+    if (isLoginInProgress()) {
+      return res.status(409).json({ ok: false, error: 'Login läuft bereits' });
+    }
+    startLogin().catch(() => {
+      /* error already captured in flow status */
+    });
+    res.json({ ok: true, status: getLoginFlowStatus() });
+  });
+
+  app.get('/login/status', (_req, res) => {
+    res.json({ session: vintedSession.snapshot(), login: getLoginFlowStatus() });
   });
 
   app.post('/circuit-breaker/reset', (_req, res) => {
@@ -22,18 +48,31 @@ export function createVintedApi(): express.Express {
     res.json({ ok: true });
   });
 
+  // Reject auth-requiring operations if login is running — the browser
+  // is busy and session state is mid-flight.
+  const rejectIfLogin = (res: Response): boolean => {
+    if (isLoginInProgress()) {
+      res.status(409).json({ ok: false, error: 'Login läuft — bitte warten' });
+      return true;
+    }
+    return false;
+  };
+
   // Trigger one poll cycle for inbox messages + offer detection.
   app.post('/poll/inbox', async (_req, res) => {
+    if (rejectIfLogin(res)) return;
     const runId = startBotRun('vinted', 'poll_inbox');
     try {
       const result = await vintedQueue.enqueue(
         () => pollVintedInbox(),
         'poll_inbox',
       );
+      vintedSession.markValid();
       finishBotRun(runId, 'success');
       res.json({ ok: true, result });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      vintedSession.handleError(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }
@@ -41,16 +80,19 @@ export function createVintedApi(): express.Express {
 
   // Trigger one poll cycle for sale status updates.
   app.post('/poll/sales', async (_req, res) => {
+    if (rejectIfLogin(res)) return;
     const runId = startBotRun('vinted', 'poll_sales');
     try {
       const result = await vintedQueue.enqueue(
         () => pollSaleStatuses(),
         'poll_sales',
       );
+      vintedSession.markValid();
       finishBotRun(runId, 'success');
       res.json({ ok: true, result });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      vintedSession.handleError(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }
