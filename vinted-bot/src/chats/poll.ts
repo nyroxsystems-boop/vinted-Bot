@@ -96,27 +96,33 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
         buttonSamples: samples,
       });
 
-      // Force-navigate to /inbox if Vinted redirected us into a specific
-      // conversation. The sidebar CAN render on /inbox/{id} too, but the
-      // reliable starting point is bare /inbox.
-      if (/\/inbox\/\d+/.test(url)) {
-        log.info('Redirected into conversation — forcing goto /inbox and retrying');
-        await page.goto(`${BASE_URL}${VINTED.inboxUrl}`, { waitUntil: 'networkidle', timeout: 20_000 }).catch(() => null);
-        const retry = await discoverConversations(page);
-        if (retry.length > 0) {
-          log.info(`Retry found ${retry.length} conversations`);
-          for (const conv of retry) {
-            const chatId = upsertChat(conv);
-            const messages = await scrapeConversationMessages(page, conv.conversationId);
-            for (const msg of messages) {
-              const parsed = parseMessageText(msg.body);
-              const inserted = insertMessageIfNew(chatId, msg, parsed);
-              if (inserted) {
-                newMessages++;
-                if (parsed.isOffer && parsed.offerAmountEur !== null) {
-                  createPendingOffer(chatId, parsed.offerAmountEur);
-                  newOffers++;
-                }
+      // Escalation: try Vinted's internal JSON API from inside the page
+      // context (uses the existing session cookies). This bypasses all the
+      // React-rendering / sidebar-collapse shenanigans and gives us
+      // structured data directly.
+      const apiResult = await fetchInboxViaApi(page).catch((err) => {
+        log.warn('API fallback failed', { error: err instanceof Error ? err.message : String(err) });
+        return null;
+      });
+
+      if (apiResult && apiResult.length > 0) {
+        log.info(`API fallback found ${apiResult.length} conversations`);
+        for (const conv of apiResult) {
+          const chatId = upsertChat({
+            conversationId: conv.conversationId,
+            buyerUsername: conv.buyerUsername,
+            lastSnippet: conv.lastSnippet,
+            lastDateLabel: conv.lastDateLabel,
+          });
+          const messages = await scrapeConversationMessages(page, conv.conversationId);
+          for (const msg of messages) {
+            const parsed = parseMessageText(msg.body);
+            const inserted = insertMessageIfNew(chatId, msg, parsed);
+            if (inserted) {
+              newMessages++;
+              if (parsed.isOffer && parsed.offerAmountEur !== null) {
+                createPendingOffer(chatId, parsed.offerAmountEur);
+                newOffers++;
               }
             }
           }
@@ -158,6 +164,75 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
  */
 async function dismissConsentIfPresent(page: Page): Promise<void> {
   await dismissOneTrust(page).catch(() => null);
+}
+
+/**
+ * Vinted has an internal REST-ish JSON API used by its own React app to
+ * populate the inbox. The URL pattern (as of April 2026) is:
+ *   /api/v2/inbox?page=1&per_page=20
+ *   /api/v2/inbox/conversations?page=1
+ *   /web/api/inbox?page=1
+ * ...it varies by deployment. We probe a handful of candidates from inside
+ * the page context (so cookies + CSRF tokens are included automatically)
+ * and parse the first one that returns JSON with a conversations array.
+ *
+ * This is the reliable path: no sidebar-rendering shenanigans, no React
+ * hydration races, just JSON.
+ */
+async function fetchInboxViaApi(page: Page): Promise<ConversationInfo[] | null> {
+  const result = await page.evaluate(async () => {
+    const candidates = [
+      '/api/v2/inbox?page=1&per_page=30',
+      '/api/v2/inbox/conversations?page=1&per_page=30',
+      '/web/api/inbox?page=1&per_page=30',
+      '/api/v2/conversations?page=1&per_page=30',
+    ];
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) continue;
+        const ct = res.headers.get('content-type') ?? '';
+        if (!ct.includes('json')) continue;
+        const body = await res.json();
+        return { url, body };
+      } catch {
+        /* try next */
+      }
+    }
+    return null;
+  });
+
+  if (!result) return null;
+
+  // Normalise the (hopefully) conversations array out of whatever Vinted
+  // returned. Common shapes:
+  //   { conversations: [...] }  OR  { items: [...] }  OR  [...]
+  const { url, body } = result as { url: string; body: unknown };
+  log.info('Inbox API probe succeeded', { url });
+  const b = body as Record<string, unknown>;
+  const arr =
+    (Array.isArray(b?.conversations) && b.conversations) ||
+    (Array.isArray(b?.items) && b.items) ||
+    (Array.isArray(body) && body) ||
+    null;
+  if (!arr) {
+    log.warn('API response had unexpected shape', { keys: Object.keys(b ?? {}) });
+    return null;
+  }
+
+  return (arr as Array<Record<string, unknown>>).map((c) => {
+    const opponent = (c.opponent as Record<string, unknown> | undefined) ?? {};
+    const lastMessage = (c.last_message as Record<string, unknown> | undefined) ?? {};
+    return {
+      conversationId: String(c.id ?? c.conversation_id ?? ''),
+      buyerUsername: String(opponent.login ?? opponent.username ?? c.username ?? 'unknown'),
+      lastSnippet: String(lastMessage.body ?? c.last_message_body ?? ''),
+      lastDateLabel: String(c.updated_at ?? c.last_message_at ?? ''),
+    };
+  }).filter((c) => c.conversationId);
 }
 
 /**
