@@ -48,6 +48,20 @@ export function createTemuApi(): express.Express {
     return false;
   };
 
+  // Auto-launch login when we detect an auth error — keeps the browser open
+  // so the user can log in without clicking a button in the dashboard.
+  const maybeAutoLogin = (err: unknown): void => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/not authenticated|login|session expired|unauthorized/i.test(msg)) {
+      if (!isLoginInProgress()) {
+        log.warn('Session invalid — auto-starting login flow');
+        startLogin().catch(() => {
+          /* captured in flow status */
+        });
+      }
+    }
+  };
+
   app.post('/circuit-breaker/reset', (_req, res) => {
     temuQueue.resetCircuitBreaker();
     res.json({ ok: true });
@@ -86,11 +100,13 @@ export function createTemuApi(): express.Express {
         `add_batch_${batchId}`,
       );
       if (result.ok) temuSession.markValid();
+      else if (result.error) maybeAutoLogin(new Error(result.error));
       finishBotRun(runId, result.ok ? 'success' : 'failure', result.error);
       res.json(result);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       temuSession.handleError(err);
+      maybeAutoLogin(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }
@@ -107,6 +123,7 @@ export function createTemuApi(): express.Express {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       temuSession.handleError(err);
+      maybeAutoLogin(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }

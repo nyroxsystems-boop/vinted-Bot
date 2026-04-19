@@ -58,6 +58,21 @@ export function createVintedApi(): express.Express {
     return false;
   };
 
+  // Auto-launch login when we detect an auth error — keeps the browser open
+  // so the user can complete the login instead of having to manually click
+  // a button in the dashboard.
+  const maybeAutoLogin = (err: unknown): void => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/not authenticated|login|session expired|unauthorized/i.test(msg)) {
+      if (!isLoginInProgress()) {
+        log.warn('Session invalid — auto-starting login flow');
+        startLogin().catch(() => {
+          /* captured in flow status */
+        });
+      }
+    }
+  };
+
   // Trigger one poll cycle for inbox messages + offer detection.
   app.post('/poll/inbox', async (_req, res) => {
     if (rejectIfLogin(res)) return;
@@ -73,6 +88,7 @@ export function createVintedApi(): express.Express {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       vintedSession.handleError(err);
+      maybeAutoLogin(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }
@@ -93,6 +109,7 @@ export function createVintedApi(): express.Express {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       vintedSession.handleError(err);
+      maybeAutoLogin(err);
       finishBotRun(runId, 'failure', error);
       res.status(500).json({ ok: false, error });
     }

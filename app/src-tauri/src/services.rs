@@ -55,6 +55,7 @@ pub struct ServiceDef {
     pub name: &'static str,
     pub args: Vec<&'static str>,
     pub http_url: Option<&'static str>,
+    pub port: u16,
     pub ready_marker: &'static str,
 }
 
@@ -64,27 +65,52 @@ pub fn service_definitions() -> Vec<ServiceDef> {
             name: "orchestrator",
             args: vec!["run", "-w", "@vinted-system/orchestrator", "start"],
             http_url: Some("http://localhost:4700"),
+            port: 4700,
             ready_marker: "Orchestrator listening",
         },
         ServiceDef {
             name: "vinted-bot",
             args: vec!["run", "-w", "@vinted-system/vinted-bot", "start"],
             http_url: Some("http://localhost:4701"),
+            port: 4701,
             ready_marker: "Vinted-bot API listening",
         },
         ServiceDef {
             name: "temu-bot",
             args: vec!["run", "-w", "@vinted-system/temu-bot", "start"],
             http_url: Some("http://localhost:4702"),
+            port: 4702,
             ready_marker: "Temu-bot API listening",
         },
         ServiceDef {
             name: "dashboard",
             args: vec!["run", "-w", "@vinted-system/dashboard", "dev"],
             http_url: Some("http://localhost:5173"),
+            port: 5173,
             ready_marker: "Local:",
         },
     ]
+}
+
+/// Kill anything holding `port`. Runs `lsof -ti :PORT` + `kill -9`.
+/// Best effort — errors are logged but not fatal.
+fn free_port(port: u16) -> Vec<u32> {
+    let out = match Command::new("/usr/sbin/lsof").arg("-ti").arg(format!(":{}", port)).output() {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect();
+    for pid in &pids {
+        let _ = Command::new("/bin/kill").arg("-9").arg(pid.to_string()).output();
+    }
+    if !pids.is_empty() {
+        // Give OS a moment to release the port.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    pids
 }
 
 pub struct Supervisor {
@@ -149,6 +175,17 @@ impl Supervisor {
 
     pub fn start_one(self: &Arc<Self>, app: &AppHandle, def: &ServiceDef) {
         self.update_status(app, def.name, "starting", None, None, def.http_url);
+
+        // Pre-flight: kill any stale process still holding the port.
+        let killed = free_port(def.port);
+        if !killed.is_empty() {
+            self.record_log(
+                app,
+                def.name,
+                "stdout",
+                &format!("Freed port {}: killed stale pid(s) {:?}", def.port, killed),
+            );
+        }
 
         let mut cmd = Command::new(&self.npm_path);
         cmd.args(&def.args)
