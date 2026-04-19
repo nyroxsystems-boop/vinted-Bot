@@ -1,5 +1,5 @@
 import type { Page, Locator } from 'playwright';
-import { createLogger, getDb, isBotBlocked } from '@vinted-system/shared';
+import { createLogger, getDb, isBotBlocked, dismissOneTrust } from '@vinted-system/shared';
 import { VINTED } from '../selectors.js';
 import { getVintedBrowser } from '../browser.js';
 import { requireLogin } from '../auth.js';
@@ -87,20 +87,11 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
 }
 
 /**
- * Vinted shows a consent dialog on first visit in a fresh browser context.
- * The bot picks "Only necessary" (most privacy-preserving + avoids advertising
- * cookies that track across domains).
+ * Vinted shows a OneTrust consent dialog on first visit. Handled uniformly
+ * via the shared helper — same approach as Temu (both use OneTrust).
  */
 async function dismissConsentIfPresent(page: Page): Promise<void> {
-  const dialog = page.locator(VINTED.consentDialog).first();
-  if ((await dialog.count()) === 0) return;
-  const necessary = page.locator(VINTED.consentAcceptNecessary).first();
-  if ((await necessary.count()) > 0) {
-    await necessary.click({ timeout: 5_000 }).catch(() => {
-      /* non-fatal */
-    });
-    await page.waitForTimeout(500);
-  }
+  await dismissOneTrust(page).catch(() => null);
 }
 
 /**

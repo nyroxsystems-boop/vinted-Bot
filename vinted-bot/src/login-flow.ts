@@ -7,7 +7,7 @@
 // /login/status.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { createLogger, SessionTracker } from '@vinted-system/shared';
+import { createLogger, SessionTracker, dismissOneTrust } from '@vinted-system/shared';
 import { getVintedBrowser, closeVintedBrowser } from './browser.js';
 import { isLoggedIn } from './auth.js';
 
@@ -72,16 +72,21 @@ export async function startLogin(): Promise<void> {
 }
 
 async function runLoginFlow(): Promise<void> {
+  // Remember previous headless mode so we can restore it after login.
+  const prevHeadless = process.env.HEADLESS;
   try {
     // Close any existing (possibly headless) browser first.
     await closeVintedBrowser();
 
-    // Force headful.
+    // Force headful so the user can actually see + interact.
     process.env.HEADLESS = 'false';
 
     const mb = await getVintedBrowser();
     const page = await mb.context.newPage();
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+    // Kill the OneTrust cookie banner so the login form is clickable.
+    await dismissOneTrust(page).catch(() => null);
 
     flowStatus.message = 'Bitte im Browser-Fenster einloggen (E-Mail, Passwort, ggf. SMS-Code).';
 
@@ -111,6 +116,9 @@ async function runLoginFlow(): Promise<void> {
     vintedSession.markInvalid(flowStatus.message);
   } finally {
     await closeVintedBrowser();
+    // Restore previous HEADLESS setting so future polls run in the background.
+    if (prevHeadless === undefined) delete process.env.HEADLESS;
+    else process.env.HEADLESS = prevHeadless;
     inProgress = false;
   }
 }

@@ -4,36 +4,12 @@
 // login so all relevant session cookies are persisted.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { createLogger, SessionTracker } from '@vinted-system/shared';
-import type { Page } from 'playwright';
+import { createLogger, SessionTracker, dismissOneTrust } from '@vinted-system/shared';
 import { getTemuBrowser, closeTemuBrowser } from './browser.js';
 import { isLoggedIn } from './auth.js';
-import { TEMU } from './selectors.js';
 
 const log = createLogger('temu-login-flow');
 
-/**
- * Dismiss Temu's cookie consent dialog (blocks login form on first visit).
- * Prefers "Alle ablehnen" for privacy; falls back to "Alle akzeptieren"
- * only if reject isn't available.
- */
-async function dismissConsent(page: Page): Promise<void> {
-  const dialog = page.locator(TEMU.consentDialog).first();
-  if ((await dialog.count()) === 0) return;
-  log.info('Consent dialog detected — dismissing');
-  const reject = page.locator(TEMU.consentRejectAll).first();
-  if ((await reject.count()) > 0) {
-    await reject.scrollIntoViewIfNeeded({ timeout: 2_000 }).catch(() => {});
-    await reject.click({ timeout: 3_000 }).catch(() => {});
-  } else {
-    const accept = page.locator(TEMU.consentAcceptAll).first();
-    if ((await accept.count()) > 0) {
-      await accept.scrollIntoViewIfNeeded({ timeout: 2_000 }).catch(() => {});
-      await accept.click({ timeout: 3_000 }).catch(() => {});
-    }
-  }
-  await page.waitForTimeout(800);
-}
 const BASE_URL = process.env.TEMU_BASE_URL ?? 'https://www.temu.com';
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -87,6 +63,7 @@ export async function startLogin(): Promise<void> {
 }
 
 async function runLoginFlow(): Promise<void> {
+  const prevHeadless = process.env.HEADLESS;
   try {
     await closeTemuBrowser();
     process.env.HEADLESS = 'false';
@@ -95,10 +72,8 @@ async function runLoginFlow(): Promise<void> {
     const page = await mb.context.newPage();
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 });
 
-    // Dismiss the cookie dialog so the login form is actually usable.
-    await dismissConsent(page).catch(() => {
-      /* non-fatal — user can also dismiss it manually */
-    });
+    // Kill the OneTrust cookie banner so the login form is usable.
+    await dismissOneTrust(page).catch(() => null);
 
     flowStatus.message =
       'Im Browser bei Temu einloggen UND einmal die Zahlungsmethode (PayPal/Klarna/Karte) durchklicken, damit deren Session-Cookies gespeichert werden.';
@@ -130,6 +105,8 @@ async function runLoginFlow(): Promise<void> {
     temuSession.markInvalid(flowStatus.message);
   } finally {
     await closeTemuBrowser();
+    if (prevHeadless === undefined) delete process.env.HEADLESS;
+    else process.env.HEADLESS = prevHeadless;
     inProgress = false;
   }
 }

@@ -7,12 +7,18 @@ const STORAGE_DIR = path.resolve(__dirname, '..', 'playwright-data');
 
 let managed: ManagedBrowser | null = null;
 
+// Default to HEADLESS (background) — the Vinted window only pops up when
+// the login-flow explicitly sets HEADLESS=false for its own session.
+function wantHeadless(): boolean {
+  return process.env.HEADLESS !== 'false';
+}
+
 export async function getVintedBrowser(): Promise<ManagedBrowser> {
   if (managed) return managed;
   managed = await launchManagedBrowser({
     scope: 'vinted-bot',
     storageDir: STORAGE_DIR,
-    headless: process.env.HEADLESS === 'true',
+    headless: wantHeadless(),
   });
   return managed;
 }

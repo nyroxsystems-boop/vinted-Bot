@@ -7,12 +7,18 @@ const STORAGE_DIR = path.resolve(__dirname, '..', 'playwright-data');
 
 let managed: ManagedBrowser | null = null;
 
+// Default HEADLESS (background). Login-flow flips HEADLESS=false for the
+// duration of its session.
+function wantHeadless(): boolean {
+  return process.env.HEADLESS !== 'false';
+}
+
 export async function getTemuBrowser(): Promise<ManagedBrowser> {
   if (managed) return managed;
   managed = await launchManagedBrowser({
     scope: 'temu-bot',
     storageDir: STORAGE_DIR,
-    headless: process.env.HEADLESS === 'true',
+    headless: wantHeadless(),
   });
   return managed;
 }
