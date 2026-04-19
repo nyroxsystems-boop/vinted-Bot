@@ -67,6 +67,8 @@ const $logs = document.getElementById('logs')!;
 const $logsTitle = document.getElementById('logs-title')!;
 const $summary = document.getElementById('summary')!;
 const $btnDashboard = document.getElementById('btn-open-dashboard') as HTMLButtonElement;
+const $btnStartAll = document.getElementById('btn-start-all') as HTMLButtonElement;
+const $btnStopAll = document.getElementById('btn-stop-all') as HTMLButtonElement;
 const $btnRestartAll = document.getElementById('btn-restart-all') as HTMLButtonElement;
 const $btnFilterAll = document.getElementById('btn-filter-all') as HTMLButtonElement;
 const $btnFilterErr = document.getElementById('btn-filter-err') as HTMLButtonElement;
@@ -98,6 +100,8 @@ function renderServices(): void {
           </div>`;
       }
       const s = state[r.key as ServiceName];
+      const canStart = s.state !== 'running' && s.state !== 'starting';
+      const canStop = s.state === 'running' || s.state === 'starting';
       return `
         <div class="service ${activeService === r.key ? 'active' : ''}" data-service="${r.key}">
           <div class="title"><span class="dot ${s.state}"></span> ${r.label}</div>
@@ -107,12 +111,29 @@ function renderServices(): void {
             ${s.httpUrl ? ` · ${s.httpUrl.replace(/^https?:\/\//, '')}` : ''}
             ${s.exitCode !== null ? ` · exit ${s.exitCode}` : ''}
           </div>
+          <div class="service-actions" data-actions="${r.key}">
+            <button class="start" data-action="start" ${canStart ? '' : 'disabled'}>▶ Start</button>
+            <button class="stop" data-action="stop" ${canStop ? '' : 'disabled'}>■ Stop</button>
+            <button data-action="restart">↻ Restart</button>
+          </div>
         </div>`;
     })
     .join('');
 
   $services.querySelectorAll('.service').forEach((el) => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (ev) => {
+      // Action buttons: don't change activeService.
+      const target = ev.target as HTMLElement;
+      if (target.tagName === 'BUTTON' && target.dataset.action) {
+        ev.stopPropagation();
+        const serviceName = (el as HTMLElement).dataset.service as ServiceName | 'all';
+        if (serviceName === 'all') return;
+        const action = target.dataset.action;
+        if (action === 'start') void invoke('start_service', { name: serviceName });
+        if (action === 'stop') void invoke('stop_service', { name: serviceName });
+        if (action === 'restart') void invoke('restart_service', { name: serviceName });
+        return;
+      }
       activeService = (el as HTMLElement).dataset.service as ServiceName | 'all';
       renderServices();
       renderLogs();
@@ -158,10 +179,19 @@ function renderLogs(): void {
 function renderSummary(): void {
   const running = SERVICES.filter((s) => state[s].state === 'running').length;
   const failed = SERVICES.filter((s) => state[s].state === 'failed').length;
+  const anyStopped = SERVICES.some(
+    (s) => state[s].state === 'exited' || state[s].state === 'failed' || state[s].state === 'unknown' as ServiceState,
+  );
+  const anyRunning = SERVICES.some(
+    (s) => state[s].state === 'running' || state[s].state === 'starting',
+  );
   const parts: string[] = [`${running}/${SERVICES.length} laufen`];
   if (failed > 0) parts.push(`${failed} fehlgeschlagen`);
   $summary.textContent = parts.join(' · ');
   $btnDashboard.disabled = running < 2;
+  $btnStartAll.disabled = !anyStopped;
+  $btnStopAll.disabled = !anyRunning;
+  $btnRestartAll.disabled = !anyRunning;
 }
 
 function applyStatus(p: StatusPayload): void {
@@ -218,6 +248,21 @@ $btnDashboard.addEventListener('click', async () => {
   await invoke('open_dashboard').catch((err) => {
     console.error('open_dashboard failed', err);
   });
+});
+
+$btnStartAll.addEventListener('click', async () => {
+  for (const s of SERVICES) {
+    if (state[s].state !== 'running' && state[s].state !== 'starting') {
+      await invoke('start_service', { name: s }).catch(() => null);
+    }
+  }
+});
+
+$btnStopAll.addEventListener('click', async () => {
+  if (!confirm('Alle Services stoppen? Polling hört auf bis du neu startest.')) return;
+  for (const s of SERVICES) {
+    await invoke('stop_service', { name: s }).catch(() => null);
+  }
 });
 
 $btnRestartAll.addEventListener('click', async () => {
