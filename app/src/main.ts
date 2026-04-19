@@ -289,6 +289,95 @@ $btnClear.addEventListener('click', () => {
   renderLogs();
 });
 
+// ── Auto-update ──────────────────────────────────────────────────────────────
+interface UpdateInfo {
+  available: boolean;
+  commits_behind: number;
+  current_sha: string;
+  remote_sha: string;
+  messages: string[];
+  has_uncommitted: boolean;
+  has_rust_changes: boolean;
+  last_checked: string;
+}
+
+const $btnUpdate = document.getElementById('btn-update') as HTMLButtonElement;
+const $modal = document.getElementById('update-modal') as HTMLDialogElement;
+const $updSummary = document.getElementById('update-summary')!;
+const $updCommits = document.getElementById('update-commits')!;
+const $updRustWarn = document.getElementById('update-rust-warn')!;
+const $updUncommittedWarn = document.getElementById('update-uncommitted-warn')!;
+const $updProgress = document.getElementById('update-progress')!;
+const $btnUpdateApply = document.getElementById('btn-update-apply') as HTMLButtonElement;
+const $btnUpdateCancel = document.getElementById('btn-update-cancel') as HTMLButtonElement;
+
+let latestUpdate: UpdateInfo | null = null;
+
+function renderUpdateBadge(info: UpdateInfo | null): void {
+  if (info?.available) {
+    $btnUpdate.style.display = '';
+    $btnUpdate.textContent = `⬇ Update (${info.commits_behind})`;
+  } else {
+    $btnUpdate.style.display = 'none';
+  }
+}
+
+function openUpdateModal(info: UpdateInfo): void {
+  $updSummary.textContent = `${info.commits_behind} neue Commits auf origin/main. Lokal: ${info.current_sha.slice(0, 7)} → remote: ${info.remote_sha.slice(0, 7)}`;
+  $updCommits.innerHTML = info.messages.map((m) => `• ${m}`).join('<br>') || '(keine)';
+  $updRustWarn.style.display = info.has_rust_changes ? '' : 'none';
+  $updUncommittedWarn.style.display = info.has_uncommitted ? '' : 'none';
+  $btnUpdateApply.disabled = info.has_uncommitted;
+  $updProgress.style.display = 'none';
+  $modal.showModal();
+}
+
+async function checkForUpdates(): Promise<void> {
+  try {
+    const info = await invoke<UpdateInfo>('check_updates');
+    latestUpdate = info;
+    renderUpdateBadge(info);
+  } catch (e) {
+    console.warn('check_updates failed', e);
+  }
+}
+
+listen<{ state: string; message: string }>('update-status', (e) => {
+  $updProgress.style.display = '';
+  $updProgress.textContent = e.payload.message;
+  if (e.payload.state === 'done' || e.payload.state === 'rust-changed') {
+    $btnUpdateApply.disabled = true;
+    $btnUpdateCancel.textContent = 'Schließen';
+  }
+});
+
+$btnUpdate.addEventListener('click', () => {
+  if (latestUpdate?.available) openUpdateModal(latestUpdate);
+});
+$btnUpdateCancel.addEventListener('click', () => {
+  $modal.close();
+  $btnUpdateApply.disabled = false;
+  $btnUpdateCancel.textContent = 'Später';
+  void checkForUpdates();
+});
+$btnUpdateApply.addEventListener('click', async () => {
+  $btnUpdateApply.disabled = true;
+  $updProgress.style.display = '';
+  $updProgress.textContent = 'Update wird angewendet…';
+  try {
+    const fresh = await invoke<UpdateInfo>('apply_updates');
+    latestUpdate = fresh;
+    renderUpdateBadge(fresh);
+    $updProgress.textContent = fresh.has_rust_changes
+      ? '✓ Update angewendet. Bitte App neu starten (Cmd+Q + npm run app:dev).'
+      : '✓ Update angewendet. Services werden neu gestartet.';
+    $btnUpdateCancel.textContent = 'Schließen';
+  } catch (e) {
+    $updProgress.textContent = `✗ Fehler: ${e}`;
+    $btnUpdateApply.disabled = false;
+  }
+});
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 renderServices();
 renderSummary();
@@ -303,6 +392,10 @@ renderSummary();
     renderServices();
     renderSummary();
     renderLogs();
+
+    // First update check immediately + every 10 minutes afterwards.
+    void checkForUpdates();
+    setInterval(() => void checkForUpdates(), 10 * 60 * 1000);
   } catch (e) {
     console.error('frontend_ready failed', e);
     // Still show something so the UI isn't frozen on "starting".

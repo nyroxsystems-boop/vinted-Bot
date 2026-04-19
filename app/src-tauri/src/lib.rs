@@ -10,11 +10,13 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 mod services;
+mod updates;
 
 use std::sync::Arc;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::services::{find_repo_root, InitialState, Supervisor};
+use crate::updates::{apply_update, check_for_updates, UpdateInfo};
 
 struct AppState {
     supervisor: Arc<Supervisor>,
@@ -88,6 +90,30 @@ fn start_service(
     Ok(())
 }
 
+// ── Auto-update commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+fn check_updates(state: tauri::State<AppState>) -> Result<UpdateInfo, String> {
+    check_for_updates(&state.supervisor.repo_root)
+}
+
+#[tauri::command]
+fn apply_updates(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<UpdateInfo, String> {
+    let sup = state.supervisor.clone();
+    // Stop services BEFORE git pull to release npm/tsx locks cleanly.
+    sup.stop_all();
+    let result = apply_update(&sup.repo_root, &sup.npm_path, &app)?;
+    // If Rust code changed, DON'T restart — user must Cmd+Q and re-run
+    // npm run app:dev, since the current process is the stale binary.
+    if !result.has_rust_changes {
+        sup.restart_all(&app);
+    }
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let repo_root = match find_repo_root() {
@@ -115,7 +141,9 @@ pub fn run() {
             open_dashboard,
             restart_service,
             stop_service,
-            start_service
+            start_service,
+            check_updates,
+            apply_updates
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

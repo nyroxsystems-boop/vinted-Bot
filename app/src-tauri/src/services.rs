@@ -288,6 +288,16 @@ impl Supervisor {
         }
     }
 
+    /// Used by the auto-updater after a successful git pull to bounce every
+    /// service. Unlike `start_all_once` this is not guarded — it always fires.
+    pub fn restart_all(self: &Arc<Self>, app: &AppHandle) {
+        self.stop_all();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        for def in self.defs.clone() {
+            self.start_one(app, &def);
+        }
+    }
+
     pub fn def_for(&self, name: &str) -> Option<&ServiceDef> {
         self.defs.iter().find(|d| d.name == name)
     }

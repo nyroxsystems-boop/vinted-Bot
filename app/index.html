@@ -111,13 +111,45 @@
         <h1>Vinted-System · Services-Konsole</h1>
         <div class="subtitle" id="summary">Initialisiere…</div>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="ghost" id="btn-update" style="display:none">⬇ Update</button>
         <button class="success" id="btn-start-all">▶ Alle starten</button>
         <button class="danger" id="btn-stop-all">■ Alle stoppen</button>
         <button class="ghost" id="btn-restart-all">↻ Neu starten</button>
         <button id="btn-open-dashboard">Dashboard öffnen</button>
       </div>
     </header>
+
+    <dialog id="update-modal"
+      style="max-width:560px;border-radius:12px;border:1px solid var(--border);padding:0;background:var(--card);color:var(--fg)">
+      <div style="padding:20px 24px">
+        <h2 style="margin:0 0 4px;font-size:16px">Update verfügbar</h2>
+        <div id="update-summary" style="font-size:12px;color:var(--muted);margin-bottom:14px"></div>
+        <div id="update-rust-warn"
+          style="display:none;padding:10px 12px;background:rgba(245,158,11,.15);border:1px solid var(--amber);border-radius:6px;font-size:12px;margin-bottom:12px">
+          ⚠️ Rust-Code hat sich geändert. Nach dem Update musst du die App manuell neu starten
+          (Cmd+Q, dann <code>npm run app:dev</code>).
+        </div>
+        <div id="update-uncommitted-warn"
+          style="display:none;padding:10px 12px;background:rgba(239,68,68,.15);border:1px solid var(--red);border-radius:6px;font-size:12px;margin-bottom:12px">
+          Lokale, uncommittete Änderungen blockieren das Update. Committe oder verwirf sie zuerst.
+        </div>
+        <div id="update-commits"
+          style="max-height:220px;overflow-y:auto;font-family:'SF Mono',Menlo,monospace;font-size:11px;background:var(--bg);padding:10px;border-radius:6px;margin-bottom:14px"></div>
+        <div id="update-progress"
+          style="display:none;padding:10px 12px;background:var(--bg);border-radius:6px;font-size:12px;margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="btn-update-cancel"
+            style="background:transparent;border:1px solid var(--border);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px">
+            Später
+          </button>
+          <button id="btn-update-apply"
+            style="background:var(--green);color:white;border:0;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500">
+            Update anwenden
+          </button>
+        </div>
+      </div>
+    </dialog>
     <main>
       <aside id="services"></aside>
       <section id="logs-panel">
