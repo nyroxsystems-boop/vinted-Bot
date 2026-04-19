@@ -50,6 +50,23 @@ export const TEMU = {
     'a[href*="/orders"]',
   ].join(', '),
 
+  // ── Consent dialog ────────────────────────────────────────────────────────
+  // Temu shows a large scrollable cookie dialog on first visit that covers
+  // most of the login form. Buttons sit below the fold at typical window
+  // sizes. Bot auto-dismisses with the privacy-preserving option first.
+  consentDialog:
+    'div[role="dialog"]:has-text("Cookie"), div:has-text("Datenschutz- & Cookie-Einstellung")',
+  consentRejectAll: [
+    'button:has-text("Alle ablehnen")',
+    'button:has-text("Reject all")',
+    'button:has-text("Nur notwendige")',
+    'button:has-text("Only necessary")',
+  ].join(', '),
+  consentAcceptAll: [
+    'button:has-text("Alle akzeptieren")',
+    'button:has-text("Accept all")',
+  ].join(', '),
+
   // ── Product page ──────────────────────────────────────────────────────────
   // Size buttons are plain <button> with the size text as innerText.
   // Exact-match regex to avoid matching "XS" inside longer strings.
