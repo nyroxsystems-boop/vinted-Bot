@@ -1,22 +1,31 @@
 // ──────────────────────────────────────────────────────────────────────────────
-// Shared Playwright helper — adapted from Catalog-Scraper/src/scraper.ts.
-// Each bot has ITS OWN browser instance + storage-state file (isolation).
+// Shared Playwright helper.
+//
+// Uses `chromium.launchPersistentContext(userDataDir)` — a full Chromium
+// profile on disk — so the browser actually behaves like a real user's
+// Chrome: Password Manager works, Autofill history is kept, Google-SSO
+// "Continue with …" remembers accounts, session cookies + localStorage
+// persist across restarts.
+//
+// Trade-off: the user-data-dir is not encrypted. Because this runs locally
+// on the user's machine the security surface is the same as their own
+// Chrome profile.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type BrowserContext, type Page } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createLogger } from './logger.js';
 
 export interface BrowserSetup {
   scope: string;
-  storageDir: string; // where state.json lives
+  storageDir: string; // parent dir; persistent profile lives inside
   headless?: boolean;
 }
 
 export interface ManagedBrowser {
-  browser: Browser;
   context: BrowserContext;
+  /** Persistent context auto-saves — kept for back-compat as a no-op. */
   saveState: () => Promise<void>;
   close: () => Promise<void>;
 }
@@ -27,15 +36,21 @@ const USER_AGENT =
 export async function launchManagedBrowser(opts: BrowserSetup): Promise<ManagedBrowser> {
   const log = createLogger(opts.scope);
 
-  if (!fs.existsSync(opts.storageDir)) {
-    fs.mkdirSync(opts.storageDir, { recursive: true });
+  // Chromium profile directory (everything lives here: cookies, localStorage,
+  // password manager DB, autofill, cache).
+  const userDataDir = path.join(opts.storageDir, 'chromium-profile');
+  if (!fs.existsSync(userDataDir)) {
+    fs.mkdirSync(userDataDir, { recursive: true });
   }
-  const storagePath = path.join(opts.storageDir, 'state.json');
-  const hasState = fs.existsSync(storagePath);
+  const hadProfile = fs.existsSync(path.join(userDataDir, 'Default'));
 
-  log.info('Launching browser', { headless: opts.headless ?? false, hasState });
+  log.info('Launching persistent browser context', {
+    headless: opts.headless ?? false,
+    userDataDir,
+    existing: hadProfile,
+  });
 
-  const browser = await chromium.launch({
+  const context = await chromium.launchPersistentContext(userDataDir, {
     headless: opts.headless ?? false,
     args: [
       '--no-sandbox',
@@ -44,47 +59,55 @@ export async function launchManagedBrowser(opts: BrowserSetup): Promise<ManagedB
       '--disable-blink-features=AutomationControlled',
       '--disable-infobars',
       '--window-size=1440,900',
+      // Enable Chrome's built-in password manager inside the managed profile.
+      '--enable-features=PasswordManagerEnable',
     ],
-  });
-
-  const context = await browser.newContext({
-    ...(hasState ? { storageState: storagePath } : {}),
     userAgent: USER_AGENT,
     viewport: { width: 1440, height: 900 },
     locale: 'de-DE',
     timezoneId: 'Europe/Berlin',
     javaScriptEnabled: true,
+    acceptDownloads: true,
   });
 
-  // Minimal stealth: hide the webdriver flag. Not a full fingerprint-evasion lib.
+  // Minimal stealth: hide the webdriver flag.
   await context.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
-  if (hasState) log.info('Restored session from state.json');
+  if (hadProfile) {
+    log.info('Restored Chromium user profile — passwords + autofill available');
+  } else {
+    log.info('Created fresh Chromium user profile');
+  }
+
+  // Legacy migration: if an old state.json exists from before the
+  // persistent-context switch, import its cookies into the fresh profile.
+  const legacyPath = path.join(opts.storageDir, 'state.json');
+  if (!hadProfile && fs.existsSync(legacyPath)) {
+    try {
+      const state = JSON.parse(fs.readFileSync(legacyPath, 'utf-8')) as {
+        cookies?: Parameters<BrowserContext['addCookies']>[0];
+      };
+      if (state.cookies?.length) {
+        await context.addCookies(state.cookies);
+        log.info(`Migrated ${state.cookies.length} cookies from legacy state.json`);
+      }
+    } catch (err) {
+      log.warn('Legacy state.json migration failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   return {
-    browser,
     context,
     async saveState() {
-      try {
-        await context.storageState({ path: storagePath });
-        log.info('Session state persisted');
-      } catch (err) {
-        log.warn('Failed to persist state', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      // Persistent context auto-persists; this remains for API back-compat.
     },
     async close() {
-      try {
-        await context.storageState({ path: storagePath });
-      } catch {
-        /* ignore */
-      }
       await context.close();
-      await browser.close();
-      log.info('Browser closed');
+      log.info('Browser closed (profile persisted)');
     },
   };
 }
