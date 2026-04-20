@@ -6,7 +6,7 @@
 
 import { createLogger, SessionTracker, dismissOneTrust } from '@vinted-system/shared';
 import { getTemuBrowser, closeTemuBrowser } from './browser.js';
-import { isLoggedIn } from './auth.js';
+import { isLoggedIn, debugAuthState } from './auth.js';
 
 const log = createLogger('temu-login-flow');
 
@@ -90,6 +90,7 @@ async function runLoginFlow(): Promise<void> {
       'Du bist auf temu.com. Klick oben rechts auf "Anmelden" und log dich ein. Wenn du willst, navigiere danach einmal zu einem Produkt und klick "Jetzt kaufen", damit die PayPal/Klarna-Session auch gespeichert wird.';
 
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+    let debugLogged = false;
     while (Date.now() < deadline) {
       if (await isLoggedIn(page)) {
         // Small extra delay so user has time to complete payment-method sub-flow.
@@ -104,6 +105,14 @@ async function runLoginFlow(): Promise<void> {
         temuSession.markValid();
         log.info('Temu login successful, session persisted');
         return;
+      }
+      // After 30s of polling, dump what the bot sees — helps diagnose
+      // cases where the user IS logged in but our detection misses it.
+      const elapsed = Date.now() - (flowStatus.started_at ? Date.parse(flowStatus.started_at) : Date.now());
+      if (!debugLogged && elapsed > 30_000) {
+        debugLogged = true;
+        const dbg = await debugAuthState(page).catch(() => ({}));
+        log.warn('Login not detected after 30s — diagnostic', dbg);
       }
       await page.waitForTimeout(3_000);
     }
