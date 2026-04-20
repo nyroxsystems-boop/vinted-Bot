@@ -153,6 +153,8 @@ CREATE TABLE IF NOT EXISTS crawled_products (
   rating           REAL,              -- 0.0 to 5.0
   review_count     INTEGER,
   search_query     TEXT,              -- which preset/query found this
+  description      TEXT,              -- long-form description from Temu detail page
+  attributes_json  TEXT,               -- JSON dict of structured attributes
   folder_num       INTEGER,           -- N in "Neuer Ordner N"
   folder_path      TEXT,              -- absolute path
   queue_file_path  TEXT,              -- absolute path to _queue/N_input.json

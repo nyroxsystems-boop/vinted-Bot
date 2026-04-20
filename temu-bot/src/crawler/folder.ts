@@ -19,6 +19,10 @@ export interface ProductRecord {
   size?: string | null;
   search_query: string;
   image_urls: string[];
+  /** Long-form description scraped from the Temu detail page. */
+  description?: string;
+  /** Structured attribute dict from the detail page (material, fit, size, …). */
+  attributes?: Record<string, string>;
 }
 
 /**
@@ -77,12 +81,35 @@ export async function materialiseProduct(
         rating: product.rating,
         review_count: product.review_count,
         search_query: product.search_query,
+        description: product.description ?? '',
+        attributes: product.attributes ?? {},
         crawled_at: new Date().toISOString(),
       },
       null,
       2,
     ),
   );
+
+  // Human-readable description.md — so the user (and Antigravity's text
+  // tools) can read the Temu copy without parsing JSON.
+  const attrLines = Object.entries(product.attributes ?? {})
+    .map(([k, v]) => `- **${k}:** ${v}`)
+    .join('\n');
+  const md = [
+    `# ${product.title}`,
+    '',
+    `**Preis:** ${product.price_eur !== null ? `€${product.price_eur.toFixed(2)}` : 'n/a'}`,
+    `**Bewertung:** ${product.rating ?? 'n/a'} (${product.review_count ?? '?'} Bewertungen)`,
+    `**Quelle:** ${product.temu_url}`,
+    '',
+    '## Produktdetails',
+    attrLines || '(keine strukturierten Attribute extrahiert)',
+    '',
+    '## Beschreibung',
+    product.description?.trim() || '(keine Beschreibung gefunden)',
+    '',
+  ].join('\n');
+  await fs.writeFile(path.join(folderPath, 'description.md'), md);
 
   // Create the Antigravity-queue input file
   const queuePath = path.join(VINTED_ROOT, '_queue', `${folderNum}_input.json`);
@@ -99,6 +126,8 @@ export async function materialiseProduct(
         source_flatlay: imagePath,
         source_gallery: saved,
         source_count: saved.length,
+        temu_description: product.description ?? '',
+        temu_attributes: product.attributes ?? {},
       },
       null,
       2,

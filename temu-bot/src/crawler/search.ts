@@ -96,17 +96,23 @@ export async function runCrawl(opts: {
             log.info('Skip — already crawled', { goodsId: card.goodsId });
             continue;
           }
-          // Enrich card with FULL gallery from the detail page — the
-          // search-card image is just the primary thumb. For proper AI
-          // generation we need front, side, back, and detail shots.
-          const gallery = await fetchDetailGallery(page, card.url, card.image_urls);
-          const enriched: CrawledCard = { ...card, image_urls: gallery };
-          log.info('Detail gallery', {
+          // Enrich card with FULL data from the detail page — the search
+          // card only gives us a thumbnail + price. For proper AI listings
+          // we need every image angle, the long-form description, and the
+          // structured attributes (material, fit, care, sizing).
+          const detail = await fetchDetailData(page, card.url, card.image_urls);
+          const enriched: CrawledCard = { ...card, image_urls: detail.images };
+          if (detail.detailTitle && detail.detailTitle.length > enriched.title.length) {
+            enriched.title = detail.detailTitle.slice(0, 200);
+          }
+          log.info('Detail scraped', {
             goodsId: card.goodsId,
-            count: gallery.length,
+            images: detail.images.length,
+            descriptionChars: detail.description.length,
+            attributeCount: Object.keys(detail.attributes).length,
           });
 
-          const saved = await persistCard(enriched, query);
+          const saved = await persistCard(enriched, query, detail);
           resOne.products.push({
             goods_id: card.goodsId,
             folder_num: saved.folderNum,
@@ -375,25 +381,50 @@ async function extractVisibleCards(page: Page): Promise<CrawledCard[]> {
   }));
 }
 
-// ── Detail-page gallery extraction ────────────────────────────────────────────
+// ── Detail-page data extraction ───────────────────────────────────────────────
+
+export interface DetailData {
+  images: string[];
+  /** Long-form product description (paragraphs). */
+  description: string;
+  /** Flat key→value map of all "Produktdetails" attributes. */
+  attributes: Record<string, string>;
+  /** Full page title from detail page (usually better than search-card title). */
+  detailTitle: string | null;
+}
 
 /**
- * Visit a Temu product detail page and collect the full image gallery
- * (main + thumbnails — front, side, back, detail shots). Falls back to
- * the search-card image if the detail page fails.
+ * Visit a Temu product detail page and pull everything useful:
+ *   - full image gallery (main + thumbnails: front, side, back, detail)
+ *   - long-form description text
+ *   - structured attributes (material, fit, care, origin, …)
+ *   - the detail-page title (often more descriptive than the card title)
  *
- * Strategy:
+ * Falls back to the search-card image if the detail page fails entirely.
+ *
+ * Gallery strategy:
  *   1. Navigate to the detail URL and wait for it to settle.
  *   2. Click through thumbnails (forces lazy-load of each high-res image).
  *   3. Collect all CDN images that cluster on the same product-hash path
  *      (Temu groups each product's photos under one directory prefix).
  *   4. Dedupe by URL-without-resize, upgrade to 800×800, cap at 8.
+ *
+ * Description strategy:
+ *   - Expand any "mehr anzeigen" / "show more" buttons first.
+ *   - Collect the "Produktdetails" / "Beschreibung" section text.
+ *   - Collect every "key: value" pair in that section as an attribute dict.
  */
-async function fetchDetailGallery(
+async function fetchDetailData(
   page: Page,
   productUrl: string,
   fallback: string[],
-): Promise<string[]> {
+): Promise<DetailData> {
+  const empty: DetailData = {
+    images: fallback,
+    description: '',
+    attributes: {},
+    detailTitle: null,
+  };
   try {
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.waitForLoadState('networkidle', { timeout: 12_000 }).catch(() => null);
@@ -421,21 +452,45 @@ async function fetchDetailGallery(
         }
       })
       .catch(() => null);
-    // Also scroll a little so lazy-loaded additional images kick in
-    for (let i = 0; i < 3; i++) {
-      await page.mouse.wheel(0, 600);
-      await sleep(400);
+    // Scroll the whole page — lazy-loads thumbnails + description section
+    for (let i = 0; i < 6; i++) {
+      await page.mouse.wheel(0, 800);
+      await sleep(500);
     }
+    // Expand any "mehr anzeigen" / "show more" buttons in the description
+    await page
+      .evaluate(() => {
+        const expanders = Array.from(
+          document.querySelectorAll<HTMLElement>('button, [role="button"], a, span'),
+        );
+        const wanted = [
+          'mehr anzeigen', 'mehr lesen', 'alle details', 'alle merkmale',
+          'show more', 'read more', 'see more', 'view all',
+        ];
+        for (const el of expanders) {
+          const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+          if (!t) continue;
+          if (wanted.some((w) => t === w || t.startsWith(w))) {
+            try {
+              el.scrollIntoView({ block: 'center' });
+              el.click();
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      })
+      .catch(() => null);
+    await sleep(600);
 
-    const raw = await page.evaluate(() => {
-      const out: Array<{ url: string; area: number }> = [];
+    const extracted = await page.evaluate(() => {
+      // ── Images ──
+      const imgOut: Array<{ url: string; area: number }> = [];
       const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('img'));
       for (const im of imgs) {
         const w = im.naturalWidth || im.width || 0;
         const h = im.naturalHeight || im.height || 0;
-        // Only keep non-tiny images
         if (w > 0 && w < 150 && h > 0 && h < 150) continue;
-
         const urls: string[] = [];
         if (im.currentSrc) urls.push(im.currentSrc);
         const srcset = im.getAttribute('srcset');
@@ -451,18 +506,104 @@ async function fetchDetailGallery(
         for (const u of urls) {
           if (!u || u.startsWith('data:')) continue;
           if (!/^https?:\/\//.test(u)) continue;
-          // Stick to Temu's CDNs
           if (!/kwcdn\.com|temu-img\.com|temucdn\.com/i.test(u)) continue;
           const area = (w * h) || 10000;
-          out.push({ url: u, area });
+          imgOut.push({ url: u, area });
         }
       }
-      return out;
+
+      // ── Detail title ──
+      const detailTitle =
+        document.querySelector<HTMLElement>('h1')?.innerText?.trim() ??
+        document.querySelector<HTMLElement>('[class*="title" i]')?.innerText?.trim() ??
+        null;
+
+      // ── Description + attributes ──
+      // Temu uses section headings like "Produktdetails", "Artikelinformationen",
+      // "Beschreibung", "Materialangaben" — scan the whole body for headings,
+      // collect each section's following text as description_parts, and
+      // collect any "Key: Value" pair inside them as attributes.
+      const sectionKeywords = [
+        'produktdetails', 'artikelinformationen', 'artikelinfo',
+        'beschreibung', 'materialangaben', 'produktinformationen',
+        'product details', 'description', 'specifications', 'material',
+        'size information', 'größeninformationen', 'größenangaben',
+      ];
+
+      const descriptionParts: string[] = [];
+      const attrs: Record<string, string> = {};
+
+      // Find any element whose text STARTS with a section keyword — its
+      // parent block typically contains the info.
+      const all = Array.from(document.querySelectorAll<HTMLElement>('*'));
+      const seenSections = new Set<HTMLElement>();
+      for (const el of all) {
+        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+        if (!t) continue;
+        if (t.length > 120) continue; // only heading-like elements
+        const hit = sectionKeywords.find((k) => t === k || t.startsWith(k));
+        if (!hit) continue;
+        // Walk up 1-3 levels to get a container with actual content
+        let container: HTMLElement | null = el.parentElement;
+        for (let lvl = 0; lvl < 3 && container; lvl++) {
+          const txt = (container.innerText || '').trim();
+          if (txt.length > 60 && !seenSections.has(container)) {
+            seenSections.add(container);
+            descriptionParts.push(txt);
+            break;
+          }
+          container = container.parentElement;
+        }
+      }
+
+      // Also grab the meta description as a fallback
+      const metaDesc =
+        document
+          .querySelector<HTMLMetaElement>('meta[name="description"]')
+          ?.getAttribute('content') ?? '';
+      if (metaDesc && metaDesc.length > 40) descriptionParts.push(metaDesc);
+
+      // Attributes from "Key: Value" lines in description text
+      const combined = descriptionParts.join('\n');
+      const lines = combined.split('\n').map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        // "Material: Polyester 95%, Spandex 5%"
+        const m = line.match(/^([A-Za-zÄÖÜäöüß \-/]{2,30})\s*[:：]\s*(.{2,200})$/);
+        if (m && m[1] && m[2]) {
+          const key = m[1].trim();
+          const val = m[2].trim();
+          if (!attrs[key]) attrs[key] = val;
+        }
+      }
+
+      // Definition-list style attributes
+      document.querySelectorAll('dl').forEach((dl) => {
+        const dts = dl.querySelectorAll('dt');
+        const dds = dl.querySelectorAll('dd');
+        const n = Math.min(dts.length, dds.length);
+        for (let i = 0; i < n; i++) {
+          const k = (dts[i] as HTMLElement)?.innerText?.trim();
+          const v = (dds[i] as HTMLElement)?.innerText?.trim();
+          if (k && v && !attrs[k]) attrs[k] = v;
+        }
+      });
+
+      // Dedupe + clean description
+      const uniqueParts = Array.from(new Set(descriptionParts));
+      const description = uniqueParts.join('\n\n').replace(/\n{3,}/g, '\n\n').slice(0, 5000);
+
+      return { imgOut, detailTitle, description, attrs };
     });
 
+    const raw = extracted.imgOut;
     if (raw.length === 0) {
-      log.warn('Detail gallery: no CDN images found', { productUrl });
-      return fallback;
+      log.warn('Detail page: no CDN images found', { productUrl });
+      return {
+        images: fallback,
+        description: extracted.description,
+        attributes: extracted.attrs,
+        detailTitle: extracted.detailTitle,
+      };
     }
 
     // Cluster by URL prefix — a product's gallery lives under one path
@@ -496,13 +637,18 @@ async function fetchDetailGallery(
       if (out.length >= 8) break;
     }
 
-    return out.length > 0 ? out : fallback;
+    return {
+      images: out.length > 0 ? out : fallback,
+      description: extracted.description,
+      attributes: extracted.attrs,
+      detailTitle: extracted.detailTitle,
+    };
   } catch (err) {
-    log.warn('Detail gallery fetch failed', {
+    log.warn('Detail page fetch failed', {
       productUrl,
       error: err instanceof Error ? err.message : String(err),
     });
-    return fallback;
+    return empty;
   }
 }
 
@@ -540,7 +686,11 @@ function applyFilters(cards: CrawledCard[], filters: CrawlerFilters): CrawledCar
 
 // ── Persist ────────────────────────────────────────────────────────────────────
 
-async function persistCard(card: CrawledCard, query: string): Promise<{
+async function persistCard(
+  card: CrawledCard,
+  query: string,
+  detail?: DetailData,
+): Promise<{
   folderNum: number;
   folderPath: string;
 }> {
@@ -553,6 +703,8 @@ async function persistCard(card: CrawledCard, query: string): Promise<{
     review_count: card.review_count,
     search_query: query,
     image_urls: card.image_urls,
+    description: detail?.description ?? '',
+    attributes: detail?.attributes ?? {},
   };
   const { folderNum, folderPath, queuePath } = await materialiseProduct(product, downloadImages);
 
@@ -561,8 +713,9 @@ async function persistCard(card: CrawledCard, query: string): Promise<{
     .prepare(
       `INSERT INTO crawled_products
          (temu_goods_id, temu_url, title, price_eur, rating, review_count,
-          search_query, folder_num, folder_path, queue_file_path, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'crawled')`,
+          search_query, description, attributes_json,
+          folder_num, folder_path, queue_file_path, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'crawled')`,
     )
     .run(
       card.goodsId,
@@ -572,6 +725,8 @@ async function persistCard(card: CrawledCard, query: string): Promise<{
       card.rating,
       card.review_count,
       query,
+      detail?.description ?? null,
+      detail ? JSON.stringify(detail.attributes) : null,
       folderNum,
       folderPath,
       queuePath,

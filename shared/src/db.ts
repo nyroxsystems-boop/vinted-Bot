@@ -36,6 +36,21 @@ export function runMigrations(): void {
   const schemaPath = path.join(__dirname, 'schema.sql');
   const sql = fs.readFileSync(schemaPath, 'utf-8');
   db.exec(sql);
+
+  // Soft column adds — schema.sql uses CREATE TABLE IF NOT EXISTS, so
+  // existing DBs don't pick up new columns. These ALTERs are idempotent
+  // in practice because SQLite raises if the column already exists;
+  // we swallow that one error and rethrow anything else.
+  const ensureColumn = (table: string, column: string, defSQL: string) => {
+    try {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${defSQL}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/duplicate column name/i.test(msg)) throw err;
+    }
+  };
+  ensureColumn('crawled_products', 'description', 'TEXT');
+  ensureColumn('crawled_products', 'attributes_json', 'TEXT');
 }
 
 export function closeDb(): void {
