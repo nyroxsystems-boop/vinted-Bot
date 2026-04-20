@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS crawled_products (
                      'crawled',       -- images downloaded, awaiting Antigravity
                      'generating',    -- Antigravity is producing model shots
                      'ready',         -- all 5 generated images present
+                     'failed',        -- generation errored — queue entry kept for retry
                      'listed',        -- posted to Vinted
                      'sold',
                      'archived'

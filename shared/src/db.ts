@@ -51,6 +51,54 @@ export function runMigrations(): void {
   };
   ensureColumn('crawled_products', 'description', 'TEXT');
   ensureColumn('crawled_products', 'attributes_json', 'TEXT');
+
+  // The original CHECK constraint on crawled_products.status doesn't
+  // allow 'failed'. SQLite can't ALTER a CHECK, so if the existing
+  // constraint is the old one we rebuild the table in a single tx.
+  const check = db
+    .prepare(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name='crawled_products'`,
+    )
+    .get() as { sql: string } | undefined;
+  if (check?.sql && !check.sql.includes("'failed'")) {
+    db.exec(`
+      BEGIN;
+      ALTER TABLE crawled_products RENAME TO crawled_products_old;
+      CREATE TABLE crawled_products (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        temu_goods_id    TEXT NOT NULL UNIQUE,
+        temu_url         TEXT NOT NULL,
+        title            TEXT,
+        price_eur        REAL,
+        rating           REAL,
+        review_count     INTEGER,
+        search_query     TEXT,
+        description      TEXT,
+        attributes_json  TEXT,
+        folder_num       INTEGER,
+        folder_path      TEXT,
+        queue_file_path  TEXT,
+        status           TEXT NOT NULL DEFAULT 'crawled'
+                         CHECK(status IN (
+                           'crawled', 'generating', 'ready', 'failed',
+                           'listed', 'sold', 'archived'
+                         )),
+        last_error       TEXT,
+        crawled_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO crawled_products
+        SELECT id, temu_goods_id, temu_url, title, price_eur, rating,
+               review_count, search_query, description, attributes_json,
+               folder_num, folder_path, queue_file_path, status,
+               last_error, crawled_at, updated_at
+          FROM crawled_products_old;
+      DROP TABLE crawled_products_old;
+      CREATE INDEX IF NOT EXISTS idx_crawled_status ON crawled_products(status);
+      CREATE INDEX IF NOT EXISTS idx_crawled_goods  ON crawled_products(temu_goods_id);
+      COMMIT;
+    `);
+  }
 }
 
 export function closeDb(): void {
