@@ -141,6 +141,13 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
     waitUntil: 'domcontentloaded',
     timeout: 30_000,
   });
+  // Wait for at least one product-link to appear before scraping — Temu's
+  // initial HTML is sparse and React populates the grid asynchronously.
+  await page
+    .locator('a[href*="-g-"][href*=".html"]')
+    .first()
+    .waitFor({ state: 'attached', timeout: 20_000 })
+    .catch(() => null);
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => null);
 
   const block = await isBotBlocked(page);
@@ -149,11 +156,11 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
     return [];
   }
 
-  // Scroll once to trigger lazy-loads
-  await page.mouse.wheel(0, 2000);
-  await sleep(1500);
-  await page.mouse.wheel(0, 2000);
-  await sleep(1500);
+  // Scroll several times to trigger lazy-loads for the full first screen
+  for (let i = 0; i < 4; i++) {
+    await page.mouse.wheel(0, 2000);
+    await sleep(1200);
+  }
 
   // Extract cards via in-page JS — much more robust than CSS selectors
   const cards = await page.evaluate(() => {
@@ -232,11 +239,20 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
 // ── Filtering ─────────────────────────────────────────────────────────────────
 
 function applyFilters(cards: CrawledCard[], filters: CrawlerFilters): CrawledCard[] {
+  // Temu search-result cards often omit rating + review_count (only shown
+  // on the detail page). Treat unknown values as "pass the filter" — the
+  // user can still filter by price, and the DB tracks whatever we did
+  // extract. Hard-filtering on unknown values would exclude every product.
   return cards.filter((c) => {
-    if (c.price_eur !== null && c.price_eur > filters.max_price_eur) return false;
-    if (filters.min_rating > 0 && (c.rating ?? 0) < filters.min_rating) return false;
-    if (filters.min_reviews > 0 && (c.review_count ?? 0) < filters.min_reviews) return false;
     if (c.image_urls.length === 0) return false;
+    if (c.price_eur !== null && c.price_eur > filters.max_price_eur) return false;
+    if (c.rating !== null && filters.min_rating > 0 && c.rating < filters.min_rating) return false;
+    if (
+      c.review_count !== null &&
+      filters.min_reviews > 0 &&
+      c.review_count < filters.min_reviews
+    )
+      return false;
     return true;
   });
 }
