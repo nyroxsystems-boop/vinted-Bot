@@ -211,7 +211,16 @@ const TOOLS = [
   {
     name: 'mark_product_done',
     description:
-      'Mark a product as fully generated. Moves _queue/{N}_input.json to _done/, updates DB status to "ready", and stores the list of generated image paths for the dashboard.',
+      'Mark a product as fully generated. STRICTLY VALIDATED:\n' +
+      '  - Requires at least 3 DISTINCT image paths.\n' +
+      '  - Every path must be absolute and live INSIDE the product folder\n' +
+      '    (typically {folder_path}/generated/). Paths pointing at shared\n' +
+      '    caches, Antigravity brain dirs, or other products are rejected.\n' +
+      '  - Every file must exist and be > 10 KB (no placeholders).\n' +
+      'If validation fails, the call returns isError:true with a reason —\n' +
+      'DO NOT retry until you have actually written real images to disk.\n' +
+      'On success: moves _queue/{N}_input.json to _done/, sets DB status\n' +
+      'to "ready", and writes generated_images.json in the product folder.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -219,7 +228,10 @@ const TOOLS = [
         generated_image_paths: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Absolute paths to the generated model/lifestyle images.',
+          description:
+            'Absolute paths to real image files, each inside the product folder ' +
+            '(e.g. /Users/home/Desktop/Vinted/Neuer Ordner 42/generated/image_1.png). ' +
+            'Minimum 3 distinct paths, each > 10 KB.',
         },
       },
       required: ['folder_num', 'generated_image_paths'],
@@ -310,39 +322,108 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
       case 'mark_product_done': {
         const a = MarkDoneArgs.parse(args);
-        // Move queue file to _done/
+
+        // VALIDATION — we trust nothing from the agent. Every claim has
+        // to match reality on disk:
+        //   1. Need at least 3 distinct image paths (we ask for 5, allow slack)
+        //   2. Every path MUST exist as a real file on disk
+        //   3. Every path MUST live inside this product's folder (prevents
+        //      the agent from pointing all 107 products at a single shared
+        //      cache directory, which is exactly what happened once)
+        //   4. Every file must be > 10 KB (no empty/tracking pixels)
+        const folderRow = getDb()
+          .prepare(`SELECT folder_path FROM crawled_products WHERE folder_num = ?`)
+          .get(a.folder_num) as { folder_path: string } | undefined;
+        if (!folderRow?.folder_path) {
+          return {
+            content: [{ type: 'text', text: `No product found for folder_num ${a.folder_num}` }],
+            isError: true,
+          };
+        }
+        const folderPath = folderRow.folder_path;
+        const uniquePaths = Array.from(new Set(a.generated_image_paths));
+
+        if (uniquePaths.length < 3) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Rejected: at least 3 DISTINCT image paths required, got ${uniquePaths.length} unique (${a.generated_image_paths.length} total). Actually generate images before calling mark_product_done.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const failures: string[] = [];
+        for (const p of uniquePaths) {
+          // Must be absolute
+          if (!path.isAbsolute(p)) {
+            failures.push(`not absolute: ${p}`);
+            continue;
+          }
+          // Must sit inside the product folder
+          const rel = path.relative(folderPath, p);
+          if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            failures.push(
+              `path outside product folder ${folderPath}: ${p}`,
+            );
+            continue;
+          }
+          // Must exist and be non-trivial size
+          const stat = await fs.stat(p).catch(() => null);
+          if (!stat) {
+            failures.push(`file not found: ${p}`);
+            continue;
+          }
+          if (!stat.isFile()) {
+            failures.push(`not a regular file: ${p}`);
+            continue;
+          }
+          if (stat.size < 10_000) {
+            failures.push(`file too small (${stat.size}B, min 10KB): ${p}`);
+          }
+        }
+        if (failures.length > 0) {
+          log('warn', 'mark_product_done rejected', {
+            folder_num: a.folder_num,
+            failures,
+          });
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `Rejected mark_product_done for folder ${a.folder_num}:\n` +
+                  failures.map((f) => `  - ${f}`).join('\n') +
+                  `\n\nGenerated images MUST live inside ${folderPath} (typically ${folderPath}/generated/) and be > 10 KB each. Generate real images, save them into the product folder, then retry.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Validation passed — commit the state change
         const src = path.join(QUEUE_DIR, `${a.folder_num}_input.json`);
         const dst = path.join(DONE_DIR, `${a.folder_num}_input.json`);
         await fs.mkdir(DONE_DIR, { recursive: true });
         await fs.rename(src, dst).catch((err) => {
-          log('warn', 'rename queue→done failed', { folder_num: a.folder_num, error: String(err) });
+          log('warn', 'rename queue→done failed', {
+            folder_num: a.folder_num,
+            error: String(err),
+          });
         });
         setStatus(a.folder_num, 'ready');
+        await fs.writeFile(
+          path.join(folderPath, 'generated_images.json'),
+          JSON.stringify(uniquePaths, null, 2),
+        );
         log('info', 'status → ready', {
           folder_num: a.folder_num,
-          images: a.generated_image_paths.length,
+          images: uniquePaths.length,
         });
-        // Also stash the paths on the product row via description append (cheap)
-        // so the dashboard can show them without a schema change.
-        const gen = JSON.stringify(a.generated_image_paths);
-        getDb()
-          .prepare(
-            `UPDATE crawled_products SET attributes_json = COALESCE(attributes_json, '{}')
-             WHERE folder_num = ?`,
-          )
-          .run(a.folder_num);
-        // Minimal write of generated_image_paths into a sidecar file
-        const folderPath = getDb()
-          .prepare(`SELECT folder_path FROM crawled_products WHERE folder_num = ?`)
-          .get(a.folder_num) as { folder_path: string } | undefined;
-        if (folderPath?.folder_path) {
-          await fs.writeFile(
-            path.join(folderPath.folder_path, 'generated_images.json'),
-            gen,
-          );
-        }
         return {
-          content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+          content: [{ type: 'text', text: JSON.stringify({ ok: true, images: uniquePaths.length }) }],
         };
       }
 
