@@ -123,54 +123,76 @@ export async function dismissOneTrust(page: import('playwright').Page): Promise<
 
   // ── Strategy 2: Click a visible reject/accept button by text ─────────
   // Works on Temu (Datenschutz- & Cookie-Einstellung dialog) and most
-  // generic banners. Searches the ENTIRE document — buttons below the
-  // fold still match because we look at .innerText regardless of visibility.
+  // generic banners. Searches the ENTIRE document INCLUDING shadow roots —
+  // buttons below the fold still match because we look at .innerText
+  // regardless of visibility.
   const textClicked = await page
     .evaluate(() => {
-      // Prefer privacy-preserving text in order of preference.
       const preferences = [
         // German
-        'Alle ablehnen',
-        'Nur notwendige',
-        'Nur Notwendige zulassen',
-        'Notwendige auswählen',
-        'Notwendige Cookies',
-        'Ablehnen',
-        'Alle akzeptieren',
-        'Akzeptieren',
+        'Alle ablehnen', 'Nur notwendige', 'Nur Notwendige zulassen',
+        'Notwendige auswählen', 'Notwendige Cookies', 'Ablehnen',
+        'Alle akzeptieren', 'Akzeptieren',
         // English
-        'Reject all',
-        'Only necessary',
-        'Only essential',
-        'Accept all',
-        'Accept',
+        'Reject all', 'Only necessary', 'Only essential',
+        'Accept all', 'Accept',
       ];
 
-      const all = Array.from(document.querySelectorAll('button, [role="button"], a')) as HTMLElement[];
+      // Walk the main DOM plus any shadow roots we find.
+      function collectClickables(root: Document | ShadowRoot): HTMLElement[] {
+        const out: HTMLElement[] = [];
+        const all = root.querySelectorAll<HTMLElement>('button, [role="button"], a');
+        all.forEach((el) => out.push(el));
+        // Descend into shadow roots
+        root.querySelectorAll<HTMLElement>('*').forEach((el) => {
+          const sr = (el as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+          if (sr) out.push(...collectClickables(sr));
+        });
+        return out;
+      }
+
+      const all = collectClickables(document);
+      const foundTexts: string[] = [];
       for (const target of preferences) {
-        const found = all.find((el) => {
+        const hit = all.find((el) => {
           const t = (el.innerText || el.textContent || '').trim();
-          // exact match preferred, but also allow prefix to survive trailing
-          // whitespace or chevrons
           return t === target || t.startsWith(target);
         });
-        if (found) {
+        if (hit) {
           try {
-            found.scrollIntoView({ block: 'center' });
-            (found as HTMLButtonElement).click();
-            return { clicked: true, label: target };
+            hit.scrollIntoView({ block: 'center' });
+            (hit as HTMLButtonElement).click();
+            return { clicked: true, label: target, totalClickables: all.length };
           } catch {
-            /* keep trying */
+            /* keep trying next preference */
           }
         }
       }
-      return { clicked: false };
+      // No hit. Return a snapshot for diagnostics.
+      for (const el of all.slice(0, 40)) {
+        const t = (el.innerText || el.textContent || '').trim().slice(0, 50);
+        if (t) foundTexts.push(t);
+      }
+      return { clicked: false, totalClickables: all.length, sampleTexts: foundTexts };
     })
-    .catch(() => ({ clicked: false }));
-  if (textClicked.clicked) {
+    .catch(() => ({ clicked: false } as { clicked: boolean; label?: string }));
+  if ('clicked' in textClicked && textClicked.clicked) {
     await page.waitForTimeout(600);
     return true;
   }
+  // Log diagnostic so we can see what buttons WERE on the page.
+  // (Only logs if no strategy worked and we reach Strategy 3.)
+  if ('sampleTexts' in textClicked) {
+    const d = textClicked as { clicked: false; totalClickables: number; sampleTexts: string[] };
+    console.warn('[dismissOneTrust] text strategy failed', {
+      totalClickables: d.totalClickables,
+      sampleTexts: d.sampleTexts.slice(0, 15),
+    });
+  }
+
+  // ── Strategy 2b: Press Escape — some dialogs listen for it ───────────
+  await page.keyboard.press('Escape').catch(() => null);
+  await page.waitForTimeout(200);
 
   // ── Strategy 3: Fixed overlay / dialog nuke ──────────────────────────
   // If still stuck, remove any fixed-position full-screen overlay and any
