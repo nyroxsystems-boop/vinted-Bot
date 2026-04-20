@@ -257,23 +257,30 @@ async function fetchInboxViaApi(page: Page): Promise<ConversationInfo[] | null> 
   }
 
   return (arr as Array<Record<string, unknown>>).map((c) => {
-    // Cover every plausible Vinted shape we've seen or suspect.
-    const opponent =
+    // Verified Vinted shape (April 2026):
+    //   { id, description, updated_at, unread, opposite_user: { id, login, ... },
+    //     item_photos: [...], ... }
+    // The "description" field holds the inbox snippet / last message body.
+    // opposite_user is the other participant (the buyer for our case).
+    //
+    // Extra fallbacks kept for robustness if Vinted changes the shape.
+    const opposite =
+      (c.opposite_user as Record<string, unknown> | undefined) ??
       (c.opponent as Record<string, unknown> | undefined) ??
       (c.user as Record<string, unknown> | undefined) ??
-      (c.opponent_user as Record<string, unknown> | undefined) ??
       {};
     const lastMessage =
       (c.last_message as Record<string, unknown> | undefined) ??
       (c.latest_message as Record<string, unknown> | undefined) ??
-      (c.preview as Record<string, unknown> | undefined) ??
       {};
     const buyerUsername =
-      opponent.login ?? opponent.username ?? opponent.display_name ?? opponent.name ??
-      c.username ?? c.opponent_username ?? c.opponent_login;
+      opposite.login ?? opposite.username ?? opposite.display_name ?? opposite.name ??
+      c.username ?? c.opponent_login;
     const snippet =
-      lastMessage.body ?? lastMessage.text ?? lastMessage.content ?? lastMessage.message ??
-      c.last_message_body ?? c.last_message_text ?? c.preview_text ?? c.message_preview;
+      // VERIFIED: top-level "description" is the inbox snippet/body.
+      c.description ??
+      lastMessage.body ?? lastMessage.text ?? lastMessage.content ??
+      c.last_message_body ?? c.preview_text;
     return {
       conversationId: String(c.id ?? c.conversation_id ?? c.thread_id ?? ''),
       buyerUsername: String(buyerUsername ?? 'unknown'),
@@ -387,12 +394,22 @@ async function inferDirection(item: Locator): Promise<'in' | 'out'> {
 
 function upsertChat(conv: ConversationInfo): number {
   const db = getDb();
-  const nowIso = new Date().toISOString();
+  const lastMsgAt = conv.lastDateLabel || new Date().toISOString();
   const existing = db
     .prepare('SELECT id FROM chats WHERE vinted_conversation_id = ?')
     .get(conv.conversationId) as { id: number } | undefined;
   if (existing) {
-    db.prepare('UPDATE chats SET last_message_at = ? WHERE id = ?').run(nowIso, existing.id);
+    // Also update buyer_username if we got a real one (fixes rows that were
+    // previously inserted with "unknown" because of a field-mapping bug).
+    db.prepare(
+      `UPDATE chats
+         SET last_message_at = ?,
+             buyer_username = CASE
+               WHEN ? = 'unknown' THEN buyer_username
+               ELSE ?
+             END
+       WHERE id = ?`,
+    ).run(lastMsgAt, conv.buyerUsername, conv.buyerUsername, existing.id);
     return existing.id;
   }
   const res = db
@@ -400,7 +417,7 @@ function upsertChat(conv: ConversationInfo): number {
       `INSERT INTO chats (vinted_conversation_id, buyer_username, last_message_at)
        VALUES (?, ?, ?)`,
     )
-    .run(conv.conversationId, conv.buyerUsername, nowIso);
+    .run(conv.conversationId, conv.buyerUsername, lastMsgAt);
   return res.lastInsertRowid as number;
 }
 
