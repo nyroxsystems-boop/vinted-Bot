@@ -96,7 +96,17 @@ export async function runCrawl(opts: {
             log.info('Skip — already crawled', { goodsId: card.goodsId });
             continue;
           }
-          const saved = await persistCard(card, query);
+          // Enrich card with FULL gallery from the detail page — the
+          // search-card image is just the primary thumb. For proper AI
+          // generation we need front, side, back, and detail shots.
+          const gallery = await fetchDetailGallery(page, card.url, card.image_urls);
+          const enriched: CrawledCard = { ...card, image_urls: gallery };
+          log.info('Detail gallery', {
+            goodsId: card.goodsId,
+            count: gallery.length,
+          });
+
+          const saved = await persistCard(enriched, query);
           resOne.products.push({
             goods_id: card.goodsId,
             folder_num: saved.folderNum,
@@ -363,6 +373,148 @@ async function extractVisibleCards(page: Page): Promise<CrawledCard[]> {
     review_count: parseReviewCount(c.reviewText),
     image_urls: c.imgUrl ? [upgradeImageUrl(c.imgUrl)] : [],
   }));
+}
+
+// ── Detail-page gallery extraction ────────────────────────────────────────────
+
+/**
+ * Visit a Temu product detail page and collect the full image gallery
+ * (main + thumbnails — front, side, back, detail shots). Falls back to
+ * the search-card image if the detail page fails.
+ *
+ * Strategy:
+ *   1. Navigate to the detail URL and wait for it to settle.
+ *   2. Click through thumbnails (forces lazy-load of each high-res image).
+ *   3. Collect all CDN images that cluster on the same product-hash path
+ *      (Temu groups each product's photos under one directory prefix).
+ *   4. Dedupe by URL-without-resize, upgrade to 800×800, cap at 8.
+ */
+async function fetchDetailGallery(
+  page: Page,
+  productUrl: string,
+  fallback: string[],
+): Promise<string[]> {
+  try {
+    await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForLoadState('networkidle', { timeout: 12_000 }).catch(() => null);
+
+    // Hover over each thumbnail to trigger the main-image swap → forces
+    // the full gallery to download. Thumbnails are typically small imgs
+    // in a scroll strip near the main image.
+    await page
+      .evaluate(async () => {
+        const thumbs = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[class*="thumb" i] img, [class*="Thumb" i] img, [class*="preview" i] img',
+          ),
+        ).slice(0, 12);
+        for (const t of thumbs) {
+          try {
+            t.scrollIntoView({ block: 'center' });
+            t.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+            t.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            (t as HTMLElement).click();
+            await new Promise((r) => setTimeout(r, 250));
+          } catch {
+            /* ignore */
+          }
+        }
+      })
+      .catch(() => null);
+    // Also scroll a little so lazy-loaded additional images kick in
+    for (let i = 0; i < 3; i++) {
+      await page.mouse.wheel(0, 600);
+      await sleep(400);
+    }
+
+    const raw = await page.evaluate(() => {
+      const out: Array<{ url: string; area: number }> = [];
+      const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('img'));
+      for (const im of imgs) {
+        const w = im.naturalWidth || im.width || 0;
+        const h = im.naturalHeight || im.height || 0;
+        // Only keep non-tiny images
+        if (w > 0 && w < 150 && h > 0 && h < 150) continue;
+
+        const urls: string[] = [];
+        if (im.currentSrc) urls.push(im.currentSrc);
+        const srcset = im.getAttribute('srcset');
+        if (srcset) {
+          srcset.split(',').forEach((p) => {
+            const u = p.trim().split(/\s+/)[0];
+            if (u) urls.push(u);
+          });
+        }
+        const ds = im.getAttribute('data-src') ?? im.getAttribute('data-original');
+        if (ds) urls.push(ds);
+        if (im.src) urls.push(im.src);
+        for (const u of urls) {
+          if (!u || u.startsWith('data:')) continue;
+          if (!/^https?:\/\//.test(u)) continue;
+          // Stick to Temu's CDNs
+          if (!/kwcdn\.com|temu-img\.com|temucdn\.com/i.test(u)) continue;
+          const area = (w * h) || 10000;
+          out.push({ url: u, area });
+        }
+      }
+      return out;
+    });
+
+    if (raw.length === 0) {
+      log.warn('Detail gallery: no CDN images found', { productUrl });
+      return fallback;
+    }
+
+    // Cluster by URL prefix — a product's gallery lives under one path
+    // like .../product/fancy/{hash}/..., so the largest cluster IS the
+    // gallery. Unrelated page chrome / recommendations fall out.
+    const prefixCount = new Map<string, typeof raw>();
+    for (const c of raw) {
+      const prefix = extractUrlPrefix(c.url);
+      const arr = prefixCount.get(prefix) ?? [];
+      arr.push(c);
+      prefixCount.set(prefix, arr);
+    }
+    let bestPrefix = '';
+    let bestCount = 0;
+    for (const [p, arr] of prefixCount) {
+      if (arr.length > bestCount) {
+        bestCount = arr.length;
+        bestPrefix = p;
+      }
+    }
+    const cluster = prefixCount.get(bestPrefix) ?? [];
+
+    // Dedupe by URL stripped of its /WxH/ resize segment
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of cluster.sort((a, b) => b.area - a.area)) {
+      const key = c.url.replace(/\/\d{2,4}x\d{2,4}\//, '/');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(upgradeImageUrl(c.url));
+      if (out.length >= 8) break;
+    }
+
+    return out.length > 0 ? out : fallback;
+  } catch (err) {
+    log.warn('Detail gallery fetch failed', {
+      productUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return fallback;
+  }
+}
+
+function extractUrlPrefix(url: string): string {
+  try {
+    const u = new URL(url);
+    const segs = u.pathname.split('/').filter(Boolean);
+    // First 4 path segments uniquely identify a Temu product's image folder
+    return `${u.origin}/${segs.slice(0, 4).join('/')}`;
+  } catch {
+    return url;
+  }
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────

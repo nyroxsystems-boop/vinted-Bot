@@ -57,7 +57,10 @@ export async function materialiseProduct(
   const sourceDir = path.join(folderPath, 'source');
   await fs.mkdir(sourceDir, { recursive: true });
 
-  // Download images — first one is the "flatlay_original" Antigravity expects
+  // Download ALL images — first one is the "flatlay_original" Antigravity
+  // expects (primary shot used for the AI wearer/env prompt). The rest
+  // (_1, _2, _3, …) are the remaining gallery angles: side, back, detail
+  // shots. Agent can reference any of them for anatomy/fit consistency.
   const saved = await downloadImages(product.image_urls, sourceDir, 'flatlay_original');
   const imagePath = saved[0] ?? '';
 
@@ -94,6 +97,8 @@ export async function materialiseProduct(
         details: product.details ?? product.title,
         size: product.size ?? 'S / 36',
         source_flatlay: imagePath,
+        source_gallery: saved,
+        source_count: saved.length,
       },
       null,
       2,
