@@ -197,11 +197,20 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
         (a.getAttribute('aria-label') ?? a.textContent ?? img?.alt ?? '').trim();
 
       const fullText = (card.innerText ?? '').replace(/\s+/g, ' ').trim();
-      // Best-effort extractors
+      // Best-effort extractors — Temu verified patterns (April 2026):
+      //   Price:   "€17.57"
+      //   Rating:  "4.8 von fünf Sternen"  (NOT just "4.8 Stern")
+      //   Reviews: "657 Bewertungen"
+      //   Sold:    "10Tsd.verkauft"
       const priceText = (fullText.match(/€\s*\d+[.,]\d{1,2}|\d+[.,]\d{1,2}\s*€/) ?? [null])[0];
-      const ratingText = (fullText.match(/\b([0-5](?:[.,]\d)?)\s*(?:★|★|Stern|von 5|\/5)/i) ?? [null])[0];
-      const reviewText = (fullText.match(/(\d{1,3}(?:[.,]\d{3})*|\d+)\s*(?:Verkäufe|sold|Bewertungen|reviews)/i) ??
-        [null])[0];
+      const ratingText =
+        (fullText.match(
+          /([0-5](?:[.,]\d)?)\s*(?:von\s+(?:fünf|5)\s+Stern|Stern|★|out of 5|\/\s*5)/i,
+        ) ?? [null])[0];
+      const reviewText =
+        (fullText.match(
+          /(\d{1,3}(?:[.,]\d{3})*|\d+)\s*(?:Bewertungen|Rezensionen|reviews|ratings)/i,
+        ) ?? [null])[0];
 
       out.push({
         goodsId,
