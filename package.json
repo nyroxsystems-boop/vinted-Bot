@@ -9,7 +9,8 @@
     "temu-bot",
     "orchestrator",
     "dashboard",
-    "app"
+    "app",
+    "antigravity-mcp"
   ],
   "engines": {
     "node": ">=20.0.0",
