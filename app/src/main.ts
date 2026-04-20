@@ -70,6 +70,7 @@ const $btnDashboard = document.getElementById('btn-open-dashboard') as HTMLButto
 const $btnStartAll = document.getElementById('btn-start-all') as HTMLButtonElement;
 const $btnStopAll = document.getElementById('btn-stop-all') as HTMLButtonElement;
 const $btnRestartAll = document.getElementById('btn-restart-all') as HTMLButtonElement;
+const $btnFullRestart = document.getElementById('btn-full-restart') as HTMLButtonElement;
 const $btnFilterAll = document.getElementById('btn-filter-all') as HTMLButtonElement;
 const $btnFilterErr = document.getElementById('btn-filter-err') as HTMLButtonElement;
 const $btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
@@ -266,9 +267,28 @@ $btnStopAll.addEventListener('click', async () => {
 });
 
 $btnRestartAll.addEventListener('click', async () => {
-  if (!confirm('Alle Services neu starten?')) return;
+  if (!confirm('Alle Services neu starten? (in-place, ohne git pull / npm install)')) return;
   for (const s of SERVICES) {
     await invoke('restart_service', { name: s }).catch(() => null);
+  }
+});
+
+$btnFullRestart.addEventListener('click', async () => {
+  if (!confirm(
+      'App komplett neu starten?\n\n' +
+      'Das macht folgendes automatisch:\n' +
+      '  1. Alle Services stoppen\n' +
+      '  2. git pull  (neueste Commits holen)\n' +
+      '  3. npm install  (neue Dependencies)\n' +
+      '  4. npm run app:dev  (App mit neuem Code starten)\n\n' +
+      'Die aktuelle App wird geschlossen und ein Terminal-Fenster öffnet sich ' +
+      'automatisch mit dem Neustart. Fortfahren?'
+    )) return;
+  try {
+    await invoke('full_restart');
+    // App will exit within 2s — window may go blank before then.
+  } catch (e) {
+    alert(`Neustart fehlgeschlagen: ${e}`);
   }
 });
 

@@ -90,6 +90,52 @@ fn start_service(
     Ok(())
 }
 
+/// "Full restart": stop services, write a shell script with the exact
+/// update-then-relaunch sequence, open it in a new Terminal window,
+/// then quit the current app. The user ends up with a clean terminal
+/// running the freshly-pulled code.
+#[tauri::command]
+fn full_restart(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    let sup = state.supervisor.clone();
+    sup.stop_all();
+
+    let repo = sup.repo_root.display().to_string();
+    let script = format!(
+        "#!/bin/bash\n\
+         set -e\n\
+         echo '════════════════════════════════════════'\n\
+         echo '  Vinted-System — Update + Neustart'\n\
+         echo '════════════════════════════════════════'\n\
+         cd \"{repo}\"\n\
+         echo '▶ git pull'\n\
+         git pull\n\
+         echo '▶ npm install'\n\
+         npm install\n\
+         echo '▶ npm run app:dev'\n\
+         exec npm run app:dev\n",
+        repo = repo
+    );
+    let script_path = "/tmp/vinted-restart.command";
+    std::fs::write(script_path, script).map_err(|e| format!("write script: {}", e))?;
+    // Make executable (0o755)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(script_path, std::fs::Permissions::from_mode(0o755));
+    }
+
+    // macOS opens .command files in Terminal.app.
+    std::process::Command::new("/usr/bin/open")
+        .arg(script_path)
+        .spawn()
+        .map_err(|e| format!("open terminal: {}", e))?;
+
+    // Give Terminal ~2s to launch before we kill ourselves.
+    std::thread::sleep(std::time::Duration::from_millis(2_000));
+    app.exit(0);
+    Ok(())
+}
+
 // ── Auto-update commands ────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -142,6 +188,7 @@ pub fn run() {
             restart_service,
             stop_service,
             start_service,
+            full_restart,
             check_updates,
             apply_updates
         ])
