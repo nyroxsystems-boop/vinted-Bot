@@ -70,13 +70,24 @@ async function runLoginFlow(): Promise<void> {
 
     const mb = await getTemuBrowser();
     const page = await mb.context.newPage();
-    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 });
 
-    // Kill the OneTrust cookie banner so the login form is usable.
+    // User explicitly wants to start on the Temu homepage — NOT /login.html.
+    // We land on the German home and let them click "Anmelden" themselves.
+    const HOME = `${BASE_URL.replace(/\/$/, '')}/de`;
+    await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+
+    // Temu sometimes auto-redirects logged-out users to /login.html. If
+    // that happened, bounce back to the home page.
+    if (/\/login\.html/.test(page.url())) {
+      log.info('Temu auto-redirected to /login.html — bouncing back to home');
+      await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    }
+
+    // Kill any cookie banner so the page is usable.
     await dismissOneTrust(page).catch(() => null);
 
     flowStatus.message =
-      'Im Browser bei Temu einloggen UND einmal die Zahlungsmethode (PayPal/Klarna/Karte) durchklicken, damit deren Session-Cookies gespeichert werden.';
+      'Du bist auf temu.com. Klick oben rechts auf "Anmelden" und log dich ein. Wenn du willst, navigiere danach einmal zu einem Produkt und klick "Jetzt kaufen", damit die PayPal/Klarna-Session auch gespeichert wird.';
 
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
     while (Date.now() < deadline) {
