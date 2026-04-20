@@ -107,6 +107,11 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
 
       if (apiResult && apiResult.length > 0) {
         log.info(`API fallback found ${apiResult.length} conversations`);
+        // Fast path: each API-returned conversation already has
+        // lastSnippet which is Vinted's auto-offer message format or the
+        // buyer's free text. We persist the conversation + that single
+        // message, and only do expensive DOM-scraping for conversations
+        // whose last_message_at changed since our last DB record.
         for (const conv of apiResult) {
           const chatId = upsertChat({
             conversationId: conv.conversationId,
@@ -114,15 +119,29 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
             lastSnippet: conv.lastSnippet,
             lastDateLabel: conv.lastDateLabel,
           });
-          const messages = await scrapeConversationMessages(page, conv.conversationId);
-          for (const msg of messages) {
-            const parsed = parseMessageText(msg.body);
-            const inserted = insertMessageIfNew(chatId, msg, parsed);
+
+          if (conv.lastSnippet) {
+            const parsed = parseMessageText(conv.lastSnippet);
+            // Use a stable "api-latest-<timestamp>" id so we don't duplicate
+            // across polls when the snippet hasn't changed.
+            const vintedMessageId = conv.lastDateLabel
+              ? `api-${conv.conversationId}-${conv.lastDateLabel}`
+              : null;
+            const inserted = insertMessageIfNew(
+              chatId,
+              { vintedMessageId, direction: 'in', body: conv.lastSnippet },
+              parsed,
+            );
             if (inserted) {
               newMessages++;
               if (parsed.isOffer && parsed.offerAmountEur !== null) {
                 createPendingOffer(chatId, parsed.offerAmountEur);
                 newOffers++;
+                log.info('Offer detected via API', {
+                  chatId,
+                  amount: parsed.offerAmountEur,
+                  buyer: conv.buyerUsername,
+                });
               }
             }
           }
