@@ -175,7 +175,7 @@ export function createTemuApi(): express.Express {
       min_rating: 4.2,
       min_reviews: 100,
       max_price_eur: 25,
-      max_per_query: 10,
+      max_per_query: 100,
     };
     try {
       const presets = await loadPresets();

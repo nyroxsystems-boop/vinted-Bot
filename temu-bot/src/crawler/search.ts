@@ -67,7 +67,10 @@ export async function runCrawl(opts: {
 
     for (const query of opts.queries) {
       log.info('Crawling query', { query });
-      const cards = await scrapeSearchResults(page, query);
+      // Oversample: filters (price / rating / review count) typically drop
+      // 50-70% of cards, so grab 2× the cap to guarantee we hit it.
+      const target = Math.max(opts.filters.max_per_query * 2, 40);
+      const cards = await scrapeSearchResults(page, query, target);
       totalFound += cards.length;
 
       const filtered = applyFilters(cards, opts.filters);
@@ -136,33 +139,114 @@ export async function runCrawl(opts: {
 
 // ── Scraping — single search query ────────────────────────────────────────────
 
-async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCard[]> {
-  await page.goto(CRAWLER.searchUrl(query), {
-    waitUntil: 'domcontentloaded',
-    timeout: 30_000,
-  });
-  // Wait for at least one product-link to appear before scraping — Temu's
-  // initial HTML is sparse and React populates the grid asynchronously.
-  await page
-    .locator('a[href*="-g-"][href*=".html"]')
-    .first()
-    .waitFor({ state: 'attached', timeout: 20_000 })
-    .catch(() => null);
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => null);
+async function scrapeSearchResults(
+  page: Page,
+  query: string,
+  targetCount: number,
+): Promise<CrawledCard[]> {
+  const merged = new Map<string, CrawledCard>();
 
-  const block = await isBotBlocked(page);
-  if (block.blocked) {
-    log.warn('Temu blocked on search', { query, reason: block.reason });
+  // Temu's search is infinite-scroll within a single URL, but they ALSO
+  // accept a page query param (&page=N) that returns the N-th block of
+  // results. We combine both: on each URL, scroll until cards stop
+  // growing, then bump the page param. Stops when we hit targetCount,
+  // max pages, or two consecutive empty pages.
+  const MAX_PAGES = 8;
+  let emptyPages = 0;
+
+  for (let pageIdx = 1; pageIdx <= MAX_PAGES; pageIdx++) {
+    const url = CRAWLER.searchUrl(query, pageIdx);
+    log.info('Crawling page', { query, pageIdx, url, soFar: merged.size });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+    await page
+      .locator('a[href*="-g-"][href*=".html"]')
+      .first()
+      .waitFor({ state: 'attached', timeout: 20_000 })
+      .catch(() => null);
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => null);
+
+    const block = await isBotBlocked(page);
+    if (block.blocked) {
+      log.warn('Temu blocked on search', { query, reason: block.reason });
+      break;
+    }
+
+    const sizeBefore = merged.size;
+    const pageCards = await infiniteScrollExtract(page, targetCount - merged.size);
+    for (const c of pageCards) {
+      if (!merged.has(c.goodsId)) merged.set(c.goodsId, c);
+    }
+    const added = merged.size - sizeBefore;
+    log.info('Page scrape done', {
+      query,
+      pageIdx,
+      pageCards: pageCards.length,
+      newUnique: added,
+      total: merged.size,
+    });
+
+    if (merged.size >= targetCount) break;
+    if (added === 0) {
+      emptyPages++;
+      if (emptyPages >= 2) break;
+    } else {
+      emptyPages = 0;
+    }
+    await sleep(1200 + Math.random() * 800);
+  }
+
+  if (merged.size === 0) {
+    log.warn('No cards parsed — dumping diagnostic', {
+      query,
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+    });
     return [];
   }
 
-  // Scroll several times to trigger lazy-loads for the full first screen
-  for (let i = 0; i < 4; i++) {
-    await page.mouse.wheel(0, 2000);
-    await sleep(1200);
+  return Array.from(merged.values());
+}
+
+/**
+ * On the current page, scroll repeatedly until no new product cards appear
+ * OR we have enough. Re-extracts after every scroll batch.
+ */
+async function infiniteScrollExtract(
+  page: Page,
+  wantMore: number,
+): Promise<CrawledCard[]> {
+  const perPageMap = new Map<string, CrawledCard>();
+  let stagnantRounds = 0;
+  const MAX_SCROLLS = 20;
+
+  for (let scrollIdx = 0; scrollIdx < MAX_SCROLLS; scrollIdx++) {
+    const cards = await extractVisibleCards(page);
+    for (const c of cards) {
+      if (!perPageMap.has(c.goodsId)) perPageMap.set(c.goodsId, c);
+    }
+    if (perPageMap.size >= wantMore) break;
+
+    const sizeBeforeScroll = perPageMap.size;
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight * 1.5));
+    await sleep(900 + Math.random() * 500);
+
+    const afterScroll = await extractVisibleCards(page);
+    for (const c of afterScroll) {
+      if (!perPageMap.has(c.goodsId)) perPageMap.set(c.goodsId, c);
+    }
+    if (perPageMap.size === sizeBeforeScroll) {
+      stagnantRounds++;
+      if (stagnantRounds >= 3) break;
+    } else {
+      stagnantRounds = 0;
+    }
   }
 
-  // Extract cards via in-page JS — much more robust than CSS selectors
+  return Array.from(perPageMap.values());
+}
+
+async function extractVisibleCards(page: Page): Promise<CrawledCard[]> {
   const cards = await page.evaluate(() => {
     const out: Array<{
       goodsId: string;
@@ -269,15 +353,6 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
     });
     return out;
   });
-
-  if (cards.length === 0) {
-    log.warn('No cards parsed — dumping diagnostic', {
-      query,
-      url: page.url(),
-      title: await page.title().catch(() => ''),
-    });
-    return [];
-  }
 
   return cards.map((c) => ({
     goodsId: c.goodsId,

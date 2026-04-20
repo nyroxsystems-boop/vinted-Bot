@@ -27,7 +27,7 @@ export function CrawlerPage() {
     min_rating: 4.2,
     min_reviews: 100,
     max_price_eur: 25,
-    max_per_query: 10,
+    max_per_query: 100,
   });
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);

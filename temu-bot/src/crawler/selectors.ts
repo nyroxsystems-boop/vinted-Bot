@@ -7,8 +7,10 @@
 
 export const CRAWLER = {
   // ── Search page ─────────────────────────────────────────────────────────
-  searchUrl: (query: string) =>
-    `https://www.temu.com/search_result.html?search_key=${encodeURIComponent(query)}`,
+  searchUrl: (query: string, page = 1) => {
+    const base = `https://www.temu.com/search_result.html?search_key=${encodeURIComponent(query)}`;
+    return page > 1 ? `${base}&page=${page}` : base;
+  },
 
   // Search-result product cards
   productCard: [
