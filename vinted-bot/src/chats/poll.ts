@@ -226,15 +226,13 @@ async function fetchInboxViaApi(page: Page): Promise<ConversationInfo[] | null> 
 
   if (!result) return null;
 
-  // Normalise the (hopefully) conversations array out of whatever Vinted
-  // returned. Common shapes:
-  //   { conversations: [...] }  OR  { items: [...] }  OR  [...]
   const { url, body } = result as { url: string; body: unknown };
   log.info('Inbox API probe succeeded', { url });
   const b = body as Record<string, unknown>;
   const arr =
     (Array.isArray(b?.conversations) && b.conversations) ||
     (Array.isArray(b?.items) && b.items) ||
+    (Array.isArray(b?.threads) && b.threads) ||
     (Array.isArray(body) && body) ||
     null;
   if (!arr) {
@@ -242,14 +240,45 @@ async function fetchInboxViaApi(page: Page): Promise<ConversationInfo[] | null> 
     return null;
   }
 
+  // Diagnostic: log the FIRST conversation's structure so we can see which
+  // fields Vinted actually uses. This appears once per successful probe.
+  const first = arr[0] as Record<string, unknown> | undefined;
+  if (first) {
+    log.info('First conversation keys', {
+      topKeys: Object.keys(first),
+      opponentKeys: typeof first.opponent === 'object' && first.opponent
+        ? Object.keys(first.opponent as object)
+        : null,
+      lastMessageKeys: typeof first.last_message === 'object' && first.last_message
+        ? Object.keys(first.last_message as object)
+        : null,
+      sample: JSON.stringify(first).slice(0, 800),
+    });
+  }
+
   return (arr as Array<Record<string, unknown>>).map((c) => {
-    const opponent = (c.opponent as Record<string, unknown> | undefined) ?? {};
-    const lastMessage = (c.last_message as Record<string, unknown> | undefined) ?? {};
+    // Cover every plausible Vinted shape we've seen or suspect.
+    const opponent =
+      (c.opponent as Record<string, unknown> | undefined) ??
+      (c.user as Record<string, unknown> | undefined) ??
+      (c.opponent_user as Record<string, unknown> | undefined) ??
+      {};
+    const lastMessage =
+      (c.last_message as Record<string, unknown> | undefined) ??
+      (c.latest_message as Record<string, unknown> | undefined) ??
+      (c.preview as Record<string, unknown> | undefined) ??
+      {};
+    const buyerUsername =
+      opponent.login ?? opponent.username ?? opponent.display_name ?? opponent.name ??
+      c.username ?? c.opponent_username ?? c.opponent_login;
+    const snippet =
+      lastMessage.body ?? lastMessage.text ?? lastMessage.content ?? lastMessage.message ??
+      c.last_message_body ?? c.last_message_text ?? c.preview_text ?? c.message_preview;
     return {
-      conversationId: String(c.id ?? c.conversation_id ?? ''),
-      buyerUsername: String(opponent.login ?? opponent.username ?? c.username ?? 'unknown'),
-      lastSnippet: String(lastMessage.body ?? c.last_message_body ?? ''),
-      lastDateLabel: String(c.updated_at ?? c.last_message_at ?? ''),
+      conversationId: String(c.id ?? c.conversation_id ?? c.thread_id ?? ''),
+      buyerUsername: String(buyerUsername ?? 'unknown'),
+      lastSnippet: snippet ? String(snippet) : '',
+      lastDateLabel: String(c.updated_at ?? c.last_message_at ?? c.created_at ?? ''),
     };
   }).filter((c) => c.conversationId);
 }
