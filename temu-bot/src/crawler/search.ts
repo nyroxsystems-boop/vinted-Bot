@@ -192,9 +192,54 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
         a.parentElement ??
         a;
 
-      const img = card.querySelector<HTMLImageElement>('img');
+      // Pick the BEST image in the card. Temu search cards contain:
+      //   - 1x1 GIF tracking pixels
+      //   - tiny LQIP blur placeholders (~800B AVIF)
+      //   - the real product image (usually via srcset / currentSrc, often
+      //     AVIF served by kwcdn.com / temu-img.com CDN)
+      // Strategy: gather all img candidates, prefer currentSrc → highest
+      // srcset entry → data-src → src. Filter out data: URIs, 1x1 pixels,
+      // and obvious non-product glyphs (icons, flags).
+      const imgUrl = (() => {
+        const imgs = Array.from(card.querySelectorAll<HTMLImageElement>('img'));
+        const candidates: Array<{ url: string; area: number }> = [];
+        for (const im of imgs) {
+          // Natural dimensions tell us if it's a real image (loaded) or a pixel
+          const w = im.naturalWidth || im.width || 0;
+          const h = im.naturalHeight || im.height || 0;
+          if (w > 0 && w < 50 && h > 0 && h < 50) continue; // tracking pixel / icon
+          // Build candidate URL list for THIS img
+          const urls: string[] = [];
+          if (im.currentSrc) urls.push(im.currentSrc);
+          const srcset = im.getAttribute('srcset');
+          if (srcset) {
+            // srcset is "url 1x, url2 2x" or "url 400w, url2 800w"
+            srcset.split(',').forEach((part) => {
+              const u = part.trim().split(/\s+/)[0];
+              if (u) urls.push(u);
+            });
+          }
+          const dataSrc = im.getAttribute('data-src') ?? im.getAttribute('data-original');
+          if (dataSrc) urls.push(dataSrc);
+          if (im.src) urls.push(im.src);
+          for (const u of urls) {
+            if (!u || u.startsWith('data:')) continue;
+            if (!/^https?:\/\//.test(u)) continue;
+            // Prefer Temu / Kwcdn image CDN domains
+            const isTemuCdn = /kwcdn\.com|temu-img\.com|temucdn\.com|temu\.com\/.*\.(jpg|jpeg|png|webp|avif)/i.test(u);
+            const area = (w * h) || (isTemuCdn ? 10000 : 1);
+            candidates.push({ url: u, area });
+          }
+        }
+        if (candidates.length === 0) return null;
+        // Largest area wins
+        candidates.sort((a, b) => b.area - a.area);
+        return candidates[0]!.url;
+      })();
+
+      const firstImg = card.querySelector<HTMLImageElement>('img');
       const title =
-        (a.getAttribute('aria-label') ?? a.textContent ?? img?.alt ?? '').trim();
+        (a.getAttribute('aria-label') ?? a.textContent ?? firstImg?.alt ?? '').trim();
 
       const fullText = (card.innerText ?? '').replace(/\s+/g, ' ').trim();
       // Best-effort extractors — Temu verified patterns (April 2026):
@@ -219,7 +264,7 @@ async function scrapeSearchResults(page: Page, query: string): Promise<CrawledCa
         priceText,
         ratingText,
         reviewText,
-        imgUrl: img?.src ?? null,
+        imgUrl,
       });
     });
     return out;
