@@ -36,4 +36,36 @@ export const temuClient = {
 
   pollOrders: () =>
     call<{ ok: boolean; result: { updated: number } }>('/poll/orders', { method: 'POST' }),
+
+  // Crawler
+  crawlerPresets: () =>
+    call<{
+      default_filters: {
+        min_rating: number;
+        min_reviews: number;
+        max_price_eur: number;
+        max_per_query: number;
+      };
+      presets: Array<{ name: string; label: string; queries: string[] }>;
+    }>('/crawler/presets'),
+
+  crawlerProducts: (status?: string) =>
+    call<unknown[]>(`/crawler/products${status ? '?status=' + status : ''}`),
+
+  crawlerRuns: () => call<unknown[]>('/crawler/runs'),
+
+  crawlerRun: (body: {
+    queries: string[];
+    filters?: Partial<{
+      min_rating: number;
+      min_reviews: number;
+      max_price_eur: number;
+      max_per_query: number;
+    }>;
+    presetName?: string;
+  }) =>
+    call<{ ok: boolean; results: Array<{ query: string; candidates: number; kept: number; errors: number; products: Array<{ goods_id: string; folder_num: number; folder_path: string }> }>; filters: unknown }>(
+      '/crawler/run',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
 };

@@ -8,6 +8,7 @@ import {
   BarChart3,
   Radio,
   Settings as SettingsIcon,
+  Search,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -19,6 +20,7 @@ interface NavItem {
 
 const ITEMS: NavItem[] = [
   { to: '/overview',    label: 'Übersicht',    icon: LayoutDashboard },
+  { to: '/crawler',     label: 'Katalog',      icon: Search },
   { to: '/fulfillment', label: 'Fulfillment',  icon: ShoppingCart },
   { to: '/listings',    label: 'Listings',     icon: Package },
   { to: '/offers',      label: 'Angebote',     icon: HandCoins },

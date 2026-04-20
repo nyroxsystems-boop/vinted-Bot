@@ -12,6 +12,7 @@ import { statusRouter } from './routes/status.js';
 import { fulfillmentRouter } from './routes/fulfillment.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { authRouter } from './routes/auth.js';
+import { crawlerRouter } from './routes/crawler.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
 
 const log = createLogger('orchestrator');
@@ -35,6 +36,7 @@ app.use('/api/status', statusRouter);
 app.use('/api/fulfillment', fulfillmentRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/crawler', crawlerRouter);
 app.use('/stream', streamRouter);
 
 const server = app.listen(PORT, () => {

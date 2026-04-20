@@ -139,6 +139,57 @@ CREATE INDEX IF NOT EXISTS idx_temu_orders_state ON temu_orders(state);
 CREATE INDEX IF NOT EXISTS idx_temu_orders_sale ON temu_orders(sale_id);
 CREATE INDEX IF NOT EXISTS idx_temu_orders_batch ON temu_orders(batch_id);
 
+-- ── Temu Crawler (product discovery) ──────────────────────────────────────────
+-- Tracks products we've scraped from Temu to avoid duplicates.
+-- One row per unique goods_id. The folder_name points to the
+-- /Users/home/Desktop/Vinted/Neuer Ordner N/ directory where
+-- Antigravity will later drop its generated photos.
+CREATE TABLE IF NOT EXISTS crawled_products (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  temu_goods_id    TEXT NOT NULL UNIQUE,
+  temu_url         TEXT NOT NULL,
+  title            TEXT,
+  price_eur        REAL,
+  rating           REAL,              -- 0.0 to 5.0
+  review_count     INTEGER,
+  search_query     TEXT,              -- which preset/query found this
+  folder_num       INTEGER,           -- N in "Neuer Ordner N"
+  folder_path      TEXT,              -- absolute path
+  queue_file_path  TEXT,              -- absolute path to _queue/N_input.json
+  status           TEXT NOT NULL DEFAULT 'crawled'
+                   CHECK(status IN (
+                     'crawled',       -- images downloaded, awaiting Antigravity
+                     'generating',    -- Antigravity is producing model shots
+                     'ready',         -- all 5 generated images present
+                     'listed',        -- posted to Vinted
+                     'sold',
+                     'archived'
+                   )),
+  last_error       TEXT,
+  crawled_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_crawled_status ON crawled_products(status);
+CREATE INDEX IF NOT EXISTS idx_crawled_goods  ON crawled_products(temu_goods_id);
+
+-- Crawler runs — audit log per run
+CREATE TABLE IF NOT EXISTS crawler_runs (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  preset_name    TEXT,
+  queries        TEXT,            -- JSON array of queries used
+  filters        TEXT,            -- JSON of filter config at run time
+  started_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at       TEXT,
+  products_found INTEGER DEFAULT 0,
+  products_kept  INTEGER DEFAULT 0,
+  status         TEXT NOT NULL DEFAULT 'running'
+                 CHECK(status IN ('running','success','partial','failed','cancelled')),
+  error          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_crawler_runs_started ON crawler_runs(started_at DESC);
+
 -- ── Bot Runs (audit log) ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS bot_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

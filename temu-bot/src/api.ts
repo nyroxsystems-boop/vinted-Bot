@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 import { createLogger, startBotRun, finishBotRun, isPaused } from '@vinted-system/shared';
+import type { CrawlerFilters } from '@vinted-system/shared';
 import { temuQueue } from './queue.js';
 import { addBatchToCart, buildOpenBatch } from './order/cart.js';
 import { pollTemuOrders } from './track/status.js';
@@ -9,6 +10,7 @@ import {
   isLoginInProgress,
   temuSession,
 } from './login-flow.js';
+import { runCrawl, loadPresets, listProducts, listRuns } from './crawler/search.js';
 
 const log = createLogger('temu-api');
 
@@ -120,6 +122,78 @@ export function createTemuApi(): express.Express {
       temuSession.markValid();
       finishBotRun(runId, 'success');
       res.json({ ok: true, result });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      temuSession.handleError(err);
+      maybeAutoLogin(err);
+      finishBotRun(runId, 'failure', error);
+      res.status(500).json({ ok: false, error });
+    }
+  });
+
+  // ── Crawler endpoints ───────────────────────────────────────────────────
+
+  app.get('/crawler/presets', async (_req, res) => {
+    try {
+      const data = await loadPresets();
+      res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/crawler/products', (req, res) => {
+    const status = (req.query.status as string | undefined) || undefined;
+    res.json(listProducts(status as any));
+  });
+
+  app.get('/crawler/runs', (_req, res) => {
+    res.json(listRuns(20));
+  });
+
+  /**
+   * POST /crawler/run
+   * Body:
+   *   { queries: string[], filters?: Partial<CrawlerFilters>, presetName?: string }
+   * Blocking — returns CrawlResult[] when done. May run for minutes.
+   */
+  app.post('/crawler/run', async (req: Request, res: Response) => {
+    if (isPaused()) return res.status(409).json({ ok: false, error: 'System paused' });
+    if (rejectIfLogin(res)) return;
+
+    const { queries, filters, presetName } = req.body as {
+      queries?: string[];
+      filters?: Partial<CrawlerFilters>;
+      presetName?: string;
+    };
+    if (!Array.isArray(queries) || queries.length === 0) {
+      return res.status(400).json({ ok: false, error: 'queries[] required' });
+    }
+
+    // Merge user filters with defaults.
+    let defaults: CrawlerFilters = {
+      min_rating: 4.2,
+      min_reviews: 100,
+      max_price_eur: 25,
+      max_per_query: 10,
+    };
+    try {
+      const presets = await loadPresets();
+      defaults = { ...defaults, ...presets.default_filters };
+    } catch {
+      /* use hard-coded defaults */
+    }
+    const merged: CrawlerFilters = { ...defaults, ...(filters ?? {}) };
+
+    const runId = startBotRun('temu', 'crawler_run');
+    try {
+      const results = await temuQueue.enqueue(
+        () => runCrawl({ queries, filters: merged, presetName }),
+        `crawler_${queries.length}q`,
+      );
+      temuSession.markValid();
+      finishBotRun(runId, 'success');
+      res.json({ ok: true, results, filters: merged });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       temuSession.handleError(err);

@@ -145,3 +145,56 @@ export interface Settings {
   temu_payment_method: TemuPaymentMethod;
   temu_batch_window_hours: number;
 }
+
+export type CrawledProductStatus =
+  | 'crawled'
+  | 'generating'
+  | 'ready'
+  | 'listed'
+  | 'sold'
+  | 'archived';
+
+export interface CrawledProduct {
+  id: number;
+  temu_goods_id: string;
+  temu_url: string;
+  title: string | null;
+  price_eur: number | null;
+  rating: number | null;
+  review_count: number | null;
+  search_query: string | null;
+  folder_num: number | null;
+  folder_path: string | null;
+  queue_file_path: string | null;
+  status: CrawledProductStatus;
+  last_error: string | null;
+  crawled_at: string;
+  updated_at: string;
+}
+
+export interface CrawlerFilters {
+  min_rating: number;      // e.g. 4.0
+  min_reviews: number;     // e.g. 50
+  max_price_eur: number;   // e.g. 25
+  max_per_query: number;   // e.g. 10
+}
+
+export interface CrawlerPreset {
+  name: string;
+  label: string;
+  queries: string[];
+  filters?: Partial<CrawlerFilters>;
+}
+
+export interface CrawlerRunSummary {
+  id: number;
+  preset_name: string | null;
+  queries: string[];
+  filters: CrawlerFilters | null;
+  started_at: string;
+  ended_at: string | null;
+  products_found: number;
+  products_kept: number;
+  status: 'running' | 'success' | 'partial' | 'failed' | 'cancelled';
+  error: string | null;
+}

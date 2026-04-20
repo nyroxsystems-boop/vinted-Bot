@@ -9,6 +9,7 @@ import { LogsPage } from './pages/Logs';
 import { SettingsPage } from './pages/Settings';
 import { FulfillmentPage } from './pages/Fulfillment';
 import { AnalyticsPage } from './pages/Analytics';
+import { CrawlerPage } from './pages/Crawler';
 
 export function App() {
   return (
@@ -20,6 +21,7 @@ export function App() {
             <Route path="/" element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<OverviewPage />} />
             <Route path="/fulfillment" element={<FulfillmentPage />} />
+            <Route path="/crawler" element={<CrawlerPage />} />
             <Route path="/listings" element={<ListingsPage />} />
             <Route path="/offers" element={<OffersPage />} />
             <Route path="/orders" element={<OrdersPage />} />
