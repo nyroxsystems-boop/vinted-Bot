@@ -116,23 +116,51 @@ fn full_restart(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<
         repo = repo
     );
     let script_path = "/tmp/vinted-restart.command";
-    std::fs::write(script_path, script).map_err(|e| format!("write script: {}", e))?;
-    // Make executable (0o755)
+    std::fs::write(script_path, &script).map_err(|e| format!("write script: {}", e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(script_path, std::fs::Permissions::from_mode(0o755));
     }
 
-    // macOS opens .command files in Terminal.app.
-    std::process::Command::new("/usr/bin/open")
+    // Open Terminal.app with the script. Try two ways — if `open -a Terminal`
+    // doesn't work for some reason (quarantine, weird default app), fall
+    // back to AppleScript.
+    let mut opened = std::process::Command::new("/usr/bin/open")
+        .arg("-a")
+        .arg("Terminal.app")
         .arg(script_path)
         .spawn()
-        .map_err(|e| format!("open terminal: {}", e))?;
+        .is_ok();
 
-    // Give Terminal ~2s to launch before we kill ourselves.
-    std::thread::sleep(std::time::Duration::from_millis(2_000));
-    app.exit(0);
+    if !opened {
+        let apple = format!(
+            "tell application \"Terminal\" to do script \"{}\"",
+            script_path
+        );
+        opened = std::process::Command::new("/usr/bin/osascript")
+            .arg("-e")
+            .arg(apple)
+            .spawn()
+            .is_ok();
+    }
+
+    if !opened {
+        return Err(
+            "Konnte Terminal.app nicht öffnen. Bitte manuell ausführen: \
+             `cd {REPO} && git pull && npm install && npm run app:dev`"
+                .replace("{REPO}", &repo),
+        );
+    }
+
+    // Schedule the exit in a background thread so this IPC call returns
+    // immediately — blocking the Tauri command thread prevents Terminal.app
+    // from finishing its launch animation.
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2_500));
+        app_handle.exit(0);
+    });
     Ok(())
 }
 

@@ -274,6 +274,7 @@ $btnRestartAll.addEventListener('click', async () => {
 });
 
 $btnFullRestart.addEventListener('click', async () => {
+  console.log('[full-restart] clicked');
   if (!confirm(
       'App komplett neu starten?\n\n' +
       'Das macht folgendes automatisch:\n' +
@@ -283,12 +284,28 @@ $btnFullRestart.addEventListener('click', async () => {
       '  4. npm run app:dev  (App mit neuem Code starten)\n\n' +
       'Die aktuelle App wird geschlossen und ein Terminal-Fenster öffnet sich ' +
       'automatisch mit dem Neustart. Fortfahren?'
-    )) return;
+    )) {
+    console.log('[full-restart] canceled by user');
+    return;
+  }
+  // Visual feedback so the click is obviously registered.
+  $btnFullRestart.disabled = true;
+  $btnFullRestart.textContent = '⏳ Starte Terminal…';
   try {
+    console.log('[full-restart] invoking full_restart');
     await invoke('full_restart');
-    // App will exit within 2s — window may go blank before then.
+    console.log('[full-restart] OK — app will exit in 2.5s');
+    $btnFullRestart.textContent = '✓ Terminal öffnet sich…';
   } catch (e) {
-    alert(`Neustart fehlgeschlagen: ${e}`);
+    console.error('[full-restart] failed', e);
+    $btnFullRestart.disabled = false;
+    $btnFullRestart.textContent = '🔄 Update & Neustart';
+    alert(
+      `Neustart fehlgeschlagen: ${e}\n\n` +
+      `Mach's manuell im Terminal:\n` +
+      `  cd /Users/home/Desktop/Partsunion/Vinted-System\n` +
+      `  git pull && npm install && npm run app:dev`,
+    );
   }
 });
 
