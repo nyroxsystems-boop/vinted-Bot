@@ -90,23 +90,19 @@ export async function launchManagedBrowser(opts: BrowserSetup): Promise<ManagedB
 }
 
 /**
- * Dismiss a OneTrust consent banner if one is present on the page.
+ * Dismiss any cookie-consent banner the page might be showing.
  *
- * Both Vinted and Temu use OneTrust. Rather than fishing for buttons that
- * may be below the fold, we call OneTrust's own JS API via page.evaluate —
- * it always works regardless of which translation or layout is active.
- *
- * Order of attempts:
- *   1. `window.OneTrust.RejectAll()` — privacy-preserving, matches EU law
- *   2. Click `#onetrust-reject-all-handler` by stable ID
- *   3. Remove `#onetrust-banner-sdk` from the DOM as a last resort so the
- *      login form becomes interactable (without giving any consent)
+ * Covers OneTrust (Vinted), Temu's own consent dialog, and a long list of
+ * generic patterns. The order tries the least-intrusive approaches first
+ * (click a proper "reject" button) before escalating to removing the
+ * overlay from the DOM.
  *
  * Safe to call on every page load — returns quickly when no banner exists.
+ * Returns `true` if something was actually dismissed.
  */
 export async function dismissOneTrust(page: import('playwright').Page): Promise<boolean> {
-  // Fast path: call the official JS API if OneTrust initialized.
-  const rejected = await page
+  // ── Strategy 1: OneTrust API (Vinted + many other sites) ─────────────
+  const oneTrustDone = await page
     .evaluate(() => {
       const w = window as unknown as { OneTrust?: { RejectAll?: () => void } };
       if (w.OneTrust?.RejectAll) {
@@ -120,34 +116,115 @@ export async function dismissOneTrust(page: import('playwright').Page): Promise<
       return false;
     })
     .catch(() => false);
-  if (rejected) {
+  if (oneTrustDone) {
     await page.waitForTimeout(400);
     return true;
   }
 
-  // Fallback 1: stable OneTrust button IDs.
-  const btn = page.locator('#onetrust-reject-all-handler, #onetrust-accept-btn-handler').first();
-  if ((await btn.count()) > 0) {
-    await btn
-      .click({ timeout: 3_000, force: true })
-      .catch(() => null);
-    await page.waitForTimeout(400);
-    return true;
-  }
-
-  // Fallback 2: remove the banner outright so the page becomes usable.
-  const removed = await page
+  // ── Strategy 2: Click a visible reject/accept button by text ─────────
+  // Works on Temu (Datenschutz- & Cookie-Einstellung dialog) and most
+  // generic banners. Searches the ENTIRE document — buttons below the
+  // fold still match because we look at .innerText regardless of visibility.
+  const textClicked = await page
     .evaluate(() => {
-      const el = document.getElementById('onetrust-banner-sdk');
-      const overlay = document.querySelector('.onetrust-pc-dark-filter');
-      if (el) el.remove();
-      if (overlay) (overlay as HTMLElement).remove();
-      // Unfreeze body in case OneTrust applied overflow:hidden
-      document.body.style.overflow = '';
-      return !!el;
+      // Prefer privacy-preserving text in order of preference.
+      const preferences = [
+        // German
+        'Alle ablehnen',
+        'Nur notwendige',
+        'Nur Notwendige zulassen',
+        'Notwendige auswählen',
+        'Notwendige Cookies',
+        'Ablehnen',
+        'Alle akzeptieren',
+        'Akzeptieren',
+        // English
+        'Reject all',
+        'Only necessary',
+        'Only essential',
+        'Accept all',
+        'Accept',
+      ];
+
+      const all = Array.from(document.querySelectorAll('button, [role="button"], a')) as HTMLElement[];
+      for (const target of preferences) {
+        const found = all.find((el) => {
+          const t = (el.innerText || el.textContent || '').trim();
+          // exact match preferred, but also allow prefix to survive trailing
+          // whitespace or chevrons
+          return t === target || t.startsWith(target);
+        });
+        if (found) {
+          try {
+            found.scrollIntoView({ block: 'center' });
+            (found as HTMLButtonElement).click();
+            return { clicked: true, label: target };
+          } catch {
+            /* keep trying */
+          }
+        }
+      }
+      return { clicked: false };
     })
-    .catch(() => false);
-  return removed;
+    .catch(() => ({ clicked: false }));
+  if (textClicked.clicked) {
+    await page.waitForTimeout(600);
+    return true;
+  }
+
+  // ── Strategy 3: Fixed overlay / dialog nuke ──────────────────────────
+  // If still stuck, remove any fixed-position full-screen overlay and any
+  // role=dialog element that appears to be a cookie notice.
+  const nuked = await page
+    .evaluate(() => {
+      let removed = 0;
+
+      const killSelectors = [
+        '#onetrust-banner-sdk',
+        '.onetrust-pc-dark-filter',
+        '[id*="cookie" i][id*="banner" i]',
+        '[class*="cookie" i][class*="banner" i]',
+        '[id*="consent" i]',
+        '[class*="consent-banner" i]',
+      ];
+      for (const s of killSelectors) {
+        document.querySelectorAll(s).forEach((el) => {
+          el.remove();
+          removed++;
+        });
+      }
+
+      // Dialogs whose text contains "Cookie" or "Datenschutz"
+      document.querySelectorAll<HTMLElement>('[role="dialog"]').forEach((d) => {
+        const t = (d.innerText || '').slice(0, 200).toLowerCase();
+        if (/cookie|datenschutz|consent|privacy/.test(t)) {
+          d.remove();
+          removed++;
+        }
+      });
+
+      // Any fixed-position full-width element near top/bottom with cookie text
+      document.querySelectorAll<HTMLElement>('*').forEach((el) => {
+        const style = window.getComputedStyle(el);
+        if (style.position !== 'fixed' && style.position !== 'sticky') return;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < window.innerWidth * 0.6) return;
+        if (rect.height < 40 || rect.height > window.innerHeight) return;
+        const t = (el.innerText || '').slice(0, 200).toLowerCase();
+        if (/cookie|datenschutz|consent|privacy/.test(t)) {
+          el.remove();
+          removed++;
+        }
+      });
+
+      // Restore scroll in case overlay froze body
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+      return removed;
+    })
+    .catch(() => 0);
+
+  return nuked > 0;
 }
 
 /**
