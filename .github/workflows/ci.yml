@@ -29,8 +29,18 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
+      - name: Versions sanity
+        run: |
+          node --version
+          npm --version
+          echo "lockfileVersion: $(node -e 'console.log(require(\"./package-lock.json\").lockfileVersion)')"
+
       - name: Install deps
-        run: npm ci --no-audit --no-fund --ignore-scripts
+        # `npm ci` is strict about lockfile vs package.json. If a workspace was
+        # added/removed without refreshing the lockfile we want to know loudly,
+        # not silently succeed via `npm install`. --verbose prints the actual
+        # failing module + line so the next CI iteration can act.
+        run: npm ci --no-audit --no-fund --ignore-scripts --verbose 2>&1 | tail -80
 
       - name: Typecheck (all workspaces)
         run: npm run typecheck
