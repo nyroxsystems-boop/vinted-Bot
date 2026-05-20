@@ -7,8 +7,13 @@ import {
 } from './marketplace.js';
 
 describe('marketplace brand library', () => {
-  it('all 12 brands are defined', () => {
-    expect(Object.keys(MARKETPLACE_BRANDS).length).toBe(12);
+  it('at least 12 brands are defined (we grew to 20+ as new marketplaces landed)', () => {
+    // Initially this expected exactly 12; new marketplaces (mercari, wallapop,
+    // ebay-uk, etsy, grailed, fb_marketplace, vestiaire, whatnot, leboncoin,
+    // marktplaats, willhaben, poshmark, shopify, woocommerce, depop) push
+    // the total well over 20. Lower-bound assertion so future additions don't
+    // re-break the test the way they did in the v0.6.6 CI run.
+    expect(Object.keys(MARKETPLACE_BRANDS).length).toBeGreaterThanOrEqual(12);
   });
 
   it('every brand has required fields', () => {

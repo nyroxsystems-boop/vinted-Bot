@@ -167,4 +167,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/release/${{ github.ref_name }}/*
-          generate_release_notes: true
+          # `generate_release_notes: true` calls the REST endpoint
+          # /generate-release-notes which needs `metadata: read` on top of
+          # contents:write. Adding both opens up more than we want. Easier
+          # to ship without auto-generated notes — the tag message + commit
+          # list in the GitHub UI tell the story well enough.
+          body: |
+            Cross-platform Tauri shell + staged-boot supervisor for the Vinted multi-marketplace system.
+
+            **Downloads:**
+            - Mac (Universal): `Blackruby_*.dmg`
+            - Windows (x64): `Blackruby_*_x64_en-US.msi` or `Blackruby_*_x64-setup.exe`
+
+            See [BUILD.md](https://github.com/nyroxsystems-boop/vinted-Bot/blob/main/BUILD.md) for setup + install instructions.
