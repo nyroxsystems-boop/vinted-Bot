@@ -104,28 +104,50 @@ Set the public key in `app/src-tauri/tauri.conf.json` under `plugins.updater.pub
 
 ---
 
-## CI Recipe (GitHub Actions)
+## CI: Release via Git Tag
 
-```yaml
-jobs:
-  build:
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: dtolnay/rust-toolchain@stable
-      - run: npm ci
-      - run: ./scripts/release.sh
-        shell: bash
-      - uses: actions/upload-artifact@v4
-        with:
-          name: blackruby-${{ matrix.os }}
-          path: dist/release/
+The real CI is `.github/workflows/ci.yml`. On every push to main it runs
+typecheck + tests. On a tag push matching `v*` it ALSO builds the macOS
+DMG **and** the Windows MSI + NSIS, then attaches everything to a
+GitHub Release.
+
+### Cut a new release in 30 seconds
+
+```bash
+# 1. Bump version in both files (one source of truth ideally — script TBD).
+node -e "['app/src-tauri/tauri.conf.json','app/package.json'].forEach(p=>{const j=require('./'+p);j.version='0.6.7';require('fs').writeFileSync(p,JSON.stringify(j,null,2)+'\n')})"
+
+# 2. Commit + push.
+git add app/src-tauri/tauri.conf.json app/package.json
+git commit -m "chore(release): bump to v0.6.7"
+git push
+
+# 3. Tag + push the tag — this is what fires the build-mac + build-windows jobs.
+git tag v0.6.7
+git push origin v0.6.7
 ```
 
-Then a release-publish step uploads to your CDN of choice (S3/CloudFront, Cloudflare R2, Vercel Blob, etc.) under the URL pattern referenced by `releases.json`.
+After ~15–20 min:
+- macOS-arm + macOS-x64 + Windows-MSI + Windows-NSIS land on
+  https://github.com/nyroxsystems-boop/vinted-Bot/releases/tag/v0.6.7
+- Auto-updater clients (after `releases.json` is regenerated) see the
+  new version and prompt the user
+
+### Re-trigger manually without re-tagging
+
+If you fix CI itself, push to main + go to the **Actions** tab → pick the
+workflow → **Run workflow** → main. That uses `workflow_dispatch` which
+runs typecheck-and-test. To force a full build, delete + re-push the tag:
+
+```bash
+git tag -d v0.6.7              # local
+git push origin :v0.6.7        # remote
+git tag v0.6.7                  # recreate at current HEAD
+git push origin v0.6.7
+```
+
+### Why the runner is on node-24
+
+The local dev environment uses node 24 (npm 11) which generates a
+lockfile-version-3 format with subtle features npm 10 (node 20) chokes
+on. The CI matrix runs node 24 across all three jobs to match local.
