@@ -277,7 +277,23 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn new(repo_root: PathBuf) -> Arc<Self> {
-        let npm_path = resolve_npm_path();
+        // If the installer included a bundled payload, prefer the extracted
+        // system + npm over the host-machine versions. The caller passed in
+        // a repo_root from find_repo_root() but for a "fat install" that's
+        // the read-only resources dir — we want the user-writable extract.
+        let (repo_root, npm_path) = if let Some((sys, npm, browsers)) = prepare_bundled_payload() {
+            // Make the bundled Playwright browsers discoverable for all
+            // child processes — set the env var globally so node + Playwright
+            // pick it up. Done in our own process so spawned children inherit.
+            std::env::set_var("PLAYWRIGHT_BROWSERS_PATH", &browsers);
+            // Also expose the bundled-system root for any tooling that reads it.
+            std::env::set_var("VINTED_SYSTEM_ROOT", &sys);
+            std::env::set_var("VINTED_SYSTEM_NPM", &npm);
+            eprintln!("[supervisor] Using bundled payload: system={} npm={}", sys.display(), npm.display());
+            (sys, npm)
+        } else {
+            (repo_root, resolve_npm_path())
+        };
         let defs = service_definitions();
 
         let mut statuses = HashMap::new();
@@ -781,6 +797,145 @@ fn resolve_npm_path() -> PathBuf {
         }
     }
     PathBuf::from(if cfg!(windows) { "npm.cmd" } else { "npm" })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bundled-payload extraction — "fat installer" support
+//
+// When the app is built with `scripts/stage-bundle.mjs` run on the CI runner
+// before `tauri build`, the installer (.msi / .exe / .dmg) ships with three
+// payload directories embedded as resources:
+//
+//   resources/system/            ← the Vinted-System monorepo source + node_modules
+//   resources/node/              ← portable Node.js for the target OS
+//   resources/playwright-browsers/← Playwright Chromium pre-downloaded
+//
+// On first launch we copy them out of the read-only resources directory into
+// a user-writable location (`%LOCALAPPDATA%\Blackruby\` on Windows,
+// `~/Library/Application Support/Blackruby/` on macOS), so node_modules can
+// be updated by `npm install` later and Playwright can write its profile
+// cache.
+//
+// `prepare_bundled_payload()` returns the path to the user-writable extract
+// once it exists. On subsequent launches it's a no-op (returns the existing
+// dir). In dev mode (no bundled resources) it returns None and the existing
+// repo-root resolution kicks in.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Where extracted payload lives on the user's machine.
+fn user_install_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Blackruby"))
+    }
+    #[cfg(unix)]
+    {
+        // ~/Library/Application Support/Blackruby on Mac.
+        // ~/.local/share/Blackruby on Linux (XDG fallback).
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        if cfg!(target_os = "macos") {
+            Some(home.join("Library").join("Application Support").join("Blackruby"))
+        } else {
+            Some(home.join(".local").join("share").join("Blackruby"))
+        }
+    }
+}
+
+/// Locate the read-only `resources/` directory shipped inside the installed
+/// app bundle. Tauri places resources next to the executable on Windows and
+/// inside `Contents/Resources/` on macOS.
+fn bundled_resources_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    #[cfg(windows)]
+    {
+        // Windows MSI/NSIS: <install-dir>\Blackruby.exe + <install-dir>\resources\
+        let candidate = exe_dir.join("resources");
+        if candidate.join("system").exists() { return Some(candidate); }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // <App>.app/Contents/MacOS/<exe> → ../Resources/
+        let candidate = exe_dir.parent()?.join("Resources");
+        if candidate.join("system").exists() { return Some(candidate); }
+    }
+    None
+}
+
+/// Copy a directory tree recursively. Skips if dest already exists with
+/// roughly the right shape (idempotent on relaunch).
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else if ty.is_symlink() {
+            // npm symlinks workspaces inside node_modules — re-create.
+            #[cfg(unix)]
+            {
+                let target = std::fs::read_link(&src_path)?;
+                if dest_path.exists() { std::fs::remove_file(&dest_path).ok(); }
+                std::os::unix::fs::symlink(&target, &dest_path)?;
+            }
+            #[cfg(windows)]
+            {
+                // Windows: copy contents instead of recreating symlink (no
+                // privileges needed for files).
+                let target = std::fs::read_link(&src_path)?;
+                if target.is_dir() { copy_dir_recursive(&target, &dest_path)?; }
+                else { std::fs::copy(&target, &dest_path)?; }
+            }
+        } else {
+            std::fs::copy(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Extract the bundled payload on first launch. Returns `(system_dir, npm_path,
+/// browsers_dir)` if the app is a "fat install"; returns `None` otherwise so
+/// the existing dev-mode + manual-repo-pick flow kicks in.
+pub fn prepare_bundled_payload() -> Option<(PathBuf, PathBuf, PathBuf)> {
+    let resources = bundled_resources_dir()?;
+    let target = user_install_dir()?;
+    std::fs::create_dir_all(&target).ok()?;
+
+    // Marker file written after a successful extract — avoids re-copying
+    // the ~1 GB tree on every launch.
+    let marker = target.join(".extracted-v1");
+    if !marker.exists() {
+        eprintln!("[bundled-payload] First launch — extracting {} -> {}", resources.display(), target.display());
+        for sub in &["system", "node", "playwright-browsers"] {
+            let s = resources.join(sub);
+            let d = target.join(sub);
+            if d.exists() { std::fs::remove_dir_all(&d).ok(); }
+            if let Err(e) = copy_dir_recursive(&s, &d) {
+                eprintln!("[bundled-payload] copy failed for {}: {}", sub, e);
+                return None;
+            }
+        }
+        // Marker after all three are in place.
+        std::fs::write(&marker, format!("extracted at {}", chrono::Utc::now())).ok();
+        eprintln!("[bundled-payload] Extract complete");
+    }
+
+    let system_dir = target.join("system");
+    #[cfg(windows)]
+    let npm = target.join("node").join("npm.cmd");
+    #[cfg(unix)]
+    let npm = target.join("node").join("bin").join("npm");
+
+    if !system_dir.exists() || !npm.exists() {
+        eprintln!("[bundled-payload] post-extract files missing — falling back to dev mode");
+        return None;
+    }
+
+    let browsers = target.join("playwright-browsers");
+    Some((system_dir, npm, browsers))
 }
 
 /// Persistent config file — lets an installed .app remember where the repo

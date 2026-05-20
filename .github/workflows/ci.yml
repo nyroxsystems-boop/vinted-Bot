@@ -94,6 +94,12 @@ jobs:
       - name: Build dashboard
         run: npm run -w @vinted-system/dashboard build
 
+      - name: Stage bundle payload (Node.js + system + Playwright Chromium)
+        # Produces app/src-tauri/payload/{system,node,playwright-browsers}
+        # which the Tauri bundler picks up via the `bundle.resources` config.
+        # ~1 GB of staged content — most of the build time goes here.
+        run: node scripts/stage-bundle.mjs --os=mac
+
       - name: Build Tauri DMG (universal)
         run: npm run -w @vinted-system/app tauri:build:mac
 
@@ -126,6 +132,12 @@ jobs:
 
       - name: Build dashboard
         run: npm run -w @vinted-system/dashboard build
+
+      - name: Stage bundle payload (Node.js + system + Playwright Chromium)
+        # Self-contained Windows installer — bundles portable Node 24,
+        # the whole monorepo with production node_modules, and Chromium
+        # so the customer downloads ONE .msi and gets everything.
+        run: node scripts/stage-bundle.mjs --os=win
 
       - name: Build Tauri Win MSI + NSIS
         run: npm run -w @vinted-system/app tauri:build:win

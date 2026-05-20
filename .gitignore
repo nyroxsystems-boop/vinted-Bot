@@ -4,6 +4,16 @@ build/
 # Rust / Tauri build artefacts
 app/src-tauri/target/
 app/src-tauri/gen/
+# Bundled-payload directory — populated by scripts/stage-bundle.mjs in CI.
+# We commit the empty placeholder structure (via .gitkeep) so dev builds
+# don't fail on missing resources, but the actual ~1 GB payload never
+# touches git.
+app/src-tauri/payload/*
+!app/src-tauri/payload/system/
+!app/src-tauri/payload/node/
+!app/src-tauri/payload/playwright-browsers/
+app/src-tauri/payload/*/*
+!app/src-tauri/payload/*/.gitkeep
 .env
 .env.local
 *.log
