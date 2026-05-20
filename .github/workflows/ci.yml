@@ -36,13 +36,13 @@ jobs:
           echo "lockfileVersion: $(node -e 'console.log(require(\"./package-lock.json\").lockfileVersion)')"
 
       - name: Install deps
-        # NO `--ignore-scripts` — that flag blocks lifecycle scripts which can
-        # leave the workspace tree half-initialised (npm-workspaces lifecycle
-        # hooks are how some packages stitch themselves together).
-        #
-        # NO tail-pipe either — `npm ci 2>&1 | tail -80` returns tail's exit
-        # code, which masks npm failures. We want the step to error loudly.
-        run: npm ci --no-audit --no-fund
+        # `npm install` (not `npm ci`) — the Mac-generated lockfile is
+        # missing Linux-only transitive deps (@emnapi/core etc. pulled in
+        # by sharp on x86_64-linux). `npm ci` is strict and refuses to
+        # heal; `npm install` adds the missing entries on the fly. We lose
+        # strict-lockfile-equality but gain cross-OS reliability — which
+        # matters more for a monorepo with native modules.
+        run: npm install --no-audit --no-fund
 
       - name: Sanity — workspaces installed?
         run: |
@@ -89,7 +89,7 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Install deps
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       - name: Build dashboard
         run: npm run -w @vinted-system/dashboard build
@@ -122,7 +122,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Install deps
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       - name: Build dashboard
         run: npm run -w @vinted-system/dashboard build
