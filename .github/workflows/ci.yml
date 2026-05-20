@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main, master, develop]
+    # Without this, tag pushes don't trigger CI at all — and the
+    # `if: startsWith(github.ref, 'refs/tags/v')` gates on build-mac /
+    # build-windows / release jobs can never become true.
+    tags: ['v*']
   pull_request:
     branches: [main, master]
+  # Allow manual trigger from the Actions tab without pushing a tag.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
