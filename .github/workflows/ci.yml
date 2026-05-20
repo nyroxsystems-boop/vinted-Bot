@@ -91,7 +91,14 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
 
-      - name: Build dashboard
+      - name: Build dashboard (license-gate bypassed — no marketing-api deployed)
+        # VITE_BYPASS_LICENSE=true bakes a "skip license check" flag into the
+        # dashboard bundle. Without it the app boots into a LicenseGate that
+        # tries to validate against https://blackruby.app — which doesn't
+        # exist yet. Once we deploy a real marketing-api with Stripe, drop
+        # this env var to re-enable license enforcement for customer builds.
+        env:
+          VITE_BYPASS_LICENSE: 'true'
         run: npm run -w @vinted-system/dashboard build
 
       - name: Stage bundle payload (Node.js + system + Playwright Chromium)
@@ -130,7 +137,14 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
 
-      - name: Build dashboard
+      - name: Build dashboard (license-gate bypassed — no marketing-api deployed)
+        # VITE_BYPASS_LICENSE=true bakes a "skip license check" flag into the
+        # dashboard bundle. Without it the app boots into a LicenseGate that
+        # tries to validate against https://blackruby.app — which doesn't
+        # exist yet. Once we deploy a real marketing-api with Stripe, drop
+        # this env var to re-enable license enforcement for customer builds.
+        env:
+          VITE_BYPASS_LICENSE: 'true'
         run: npm run -w @vinted-system/dashboard build
 
       - name: Stage bundle payload (Node.js + system + Playwright Chromium)
