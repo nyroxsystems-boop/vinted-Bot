@@ -20,3 +20,33 @@ playwright-data/
 *.db-shm
 .DS_Store
 *.tsbuildinfo
+
+# macOS extended-attribute resource forks (created by Finder/Time-Machine).
+# Always junk in git.
+._*
+
+# Python venv used by some scripts
+venv/
+
+# Loop-cycle scratchpads
+_loop_*.md
+_loop_*.txt
+_logs/
+
+# Backup snapshots created by in-app tarball updates
+.backup/
+
+# Temporary .env staging files
+.env.tmp
+
+# Bot data dirs (chromium-profiles, session storage, scraping cache)
+# Multi-GB each — never commit.
+/data/
+*/data/
+!*/data/.gitkeep
+*-bot/data/
+kleinanzeigen-bot/_diag/
+*/playwright-data/
+# Tarball snapshots of chromium-profiles taken by health-watcher
+chromium-profile.flagged*.tgz
+chromium-profile.*.tgz

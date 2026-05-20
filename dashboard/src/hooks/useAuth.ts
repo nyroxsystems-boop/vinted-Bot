@@ -18,10 +18,7 @@ export interface BotAuth {
   };
 }
 
-export interface AuthBundle {
-  vinted: BotAuth | { error: string };
-  temu: BotAuth | { error: string };
-}
+export type AuthBundle = Record<string, BotAuth | { error: string }>;
 
 export function useAuthStatus(pollMs = 3000) {
   const [data, setData] = useState<AuthBundle | null>(null);
@@ -41,7 +38,7 @@ export function useAuthStatus(pollMs = 3000) {
     return () => clearInterval(t);
   }, [reload, pollMs]);
 
-  const startLogin = useCallback(async (which: 'vinted' | 'temu') => {
+  const startLogin = useCallback(async (which: string) => {
     await api.post(`/auth/${which}/login`);
     await reload();
   }, [reload]);

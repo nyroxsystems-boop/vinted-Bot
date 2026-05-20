@@ -173,7 +173,7 @@ function FunnelDisplay({ funnel }: { funnel: { offers: number; accepted: number;
     { label: 'Angebote', value: funnel.offers, color: 'bg-slate-400' },
     { label: 'Akzeptiert', value: funnel.accepted, color: 'bg-brand-500' },
     { label: 'Bezahlt', value: funnel.paid, color: 'bg-green-500' },
-    { label: 'Erfüllt', value: funnel.fulfilled, color: 'bg-emerald-600' },
+    { label: 'Erfüllt', value: funnel.fulfilled, color: 'bg-rose-600' },
   ];
   const max = Math.max(1, ...stages.map((s) => s.value));
   return (

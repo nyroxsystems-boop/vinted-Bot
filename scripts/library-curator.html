@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Library Curator — 30 Pose-Kandidaten</title>
+<style>
+  body {
+    background: #1a1a1a;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    margin: 0;
+    padding: 20px;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    background: #1a1a1a;
+    padding: 16px 0;
+    border-bottom: 1px solid #333;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  h1 { margin: 0; font-size: 18px; }
+  .stats { color: #888; font-size: 14px; }
+  #copy-btn, #script-btn {
+    background: #4a90e2;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #copy-btn:hover, #script-btn:hover { background: #357ab8; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .card {
+    position: relative;
+    cursor: pointer;
+    border: 3px solid transparent;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #2a2a2a;
+    transition: transform 0.1s;
+  }
+  .card:hover { transform: scale(1.02); }
+  .card.picked {
+    border-color: #4ade80;
+  }
+  .card.failed {
+    border-color: #ef4444;
+    opacity: 0.5;
+  }
+  .card.failed::after {
+    content: 'FAIL';
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: #ef4444;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+  }
+  .card.missing {
+    background: #2a2a2a url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="15" fill="none" stroke="%23555" stroke-width="2" stroke-dasharray="4"/></svg>') center/40px no-repeat;
+    min-height: 280px;
+    opacity: 0.4;
+  }
+  .card.missing img { display: none; }
+  .card img {
+    width: 100%;
+    display: block;
+  }
+  .label {
+    padding: 8px;
+    font-size: 13px;
+    text-align: center;
+    background: #2a2a2a;
+  }
+  .checkmark {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    background: #4ade80;
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 16px;
+  }
+  .card.picked .checkmark { display: flex; }
+  pre {
+    background: #0a0a0a;
+    padding: 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    color: #4ade80;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Library Curator</h1>
+    <span class="stats">Picked: <strong id="count">0</strong> / <span id="total">60</span> (Ziel: 20-30)</span>
+    <button id="reload-btn">🔄 Reload</button>
+    <button id="copy-btn">Copy Pick-Liste</button>
+    <button id="script-btn">Copy Move-Script</button>
+    <span id="legend" style="margin-left:auto;font-size:13px;color:#888;">
+      <span style="color:#4ade80;">●</span> picked
+      <span style="color:#ef4444;margin-left:12px;">●</span> validation FAIL
+    </span>
+  </header>
+
+  <div class="grid" id="grid"></div>
+
+  <h2 style="margin-top: 40px;">Move-Script (in Terminal ausführen):</h2>
+  <pre id="script">Klick auf "Copy Move-Script" oben um den fertigen Befehl zu kopieren.</pre>
+
+<script>
+  const TOTAL = 60;
+  const grid = document.getElementById('grid');
+  const counter = document.getElementById('count');
+  const totalEl = document.getElementById('total');
+  const scriptBox = document.getElementById('script');
+  const STORAGE_KEY = 'library-curator-picks';
+
+  totalEl.textContent = TOTAL;
+
+  // Load saved picks
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  const picks = new Set(saved);
+
+  // Try to load validation report
+  let validation = null;
+  fetch('../../_anchors/library/validation.json')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => { validation = data; renderAll(); })
+    .catch(() => {});
+
+  function getValidation(filename) {
+    if (!validation?.results) return null;
+    return validation.results.find(r => r.filename === filename);
+  }
+
+  function renderAll() {
+    grid.innerHTML = '';
+    for (let i = 1; i <= TOTAL; i++) {
+      const num = String(i).padStart(3, '0');
+      const filename = `pose_${num}.jpg`;
+      const v = getValidation(filename);
+      const failed = v?.verdict === 'FAIL';
+      const card = document.createElement('div');
+      const classes = ['card'];
+      if (picks.has(filename)) classes.push('picked');
+      if (failed) classes.push('failed');
+      card.className = classes.join(' ');
+      card.dataset.filename = filename;
+      const errs = v?.errors?.length ? `<div style="font-size:10px;color:#ef4444;padding:4px;">${v.errors.slice(0,2).map(e => '• ' + e).join('<br>')}</div>` : '';
+      card.innerHTML = `
+        <div class="checkmark">✓</div>
+        <img src="../../_anchors/library/_candidates/${filename}" alt="${filename}" loading="lazy" onerror="this.parentElement.classList.add('missing')">
+        <div class="label">${filename}</div>
+        ${errs}
+      `;
+      card.addEventListener('click', () => {
+        if (picks.has(filename)) {
+          picks.delete(filename);
+          card.classList.remove('picked');
+        } else {
+          picks.add(filename);
+          card.classList.add('picked');
+        }
+        updateState();
+      });
+      grid.appendChild(card);
+    }
+    updateState();
+  }
+
+  function updateState() {
+    counter.textContent = picks.size;
+    const sorted = [...picks].sort();
+    const moveScript = sorted.length === 0
+      ? '# Picke noch keine Bilder ausgewählt'
+      : `cd /Users/home/Vinted/_anchors/library/_candidates/\nmv ${sorted.join(' \\\n   ')} \\\n   ../`;
+    scriptBox.textContent = moveScript;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
+  }
+
+  document.getElementById('reload-btn').addEventListener('click', () => location.reload());
+
+  document.getElementById('copy-btn').addEventListener('click', () => {
+    const sorted = [...picks].sort();
+    navigator.clipboard.writeText(sorted.join('\n'));
+    alert(`${sorted.length} Filenames kopiert.`);
+  });
+
+  document.getElementById('script-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(scriptBox.textContent);
+    alert('Move-Script kopiert. Im Terminal einfügen + Enter.');
+  });
+
+  renderAll();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 {
   "name": "@vinted-system/app",
-  "version": "0.1.0",
+  "version": "0.6.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,10 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "tauri:build:mac": "tauri build --target universal-apple-darwin --bundles dmg,app",
+    "tauri:build:mac:arm": "tauri build --target aarch64-apple-darwin --bundles dmg,app",
+    "tauri:build:mac:intel": "tauri build --target x86_64-apple-darwin --bundles dmg,app",
+    "tauri:build:win": "tauri build --target x86_64-pc-windows-msvc --bundles msi,nsis",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

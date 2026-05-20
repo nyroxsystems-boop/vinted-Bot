@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
     "@vinted-system/shared": "*",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",

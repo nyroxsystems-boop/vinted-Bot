@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { streamUrl } from './base.js';
 
 // Live SSE feed from the orchestrator. Each message is a JSON-encoded SystemEvent.
 // We type this loosely here to avoid coupling the dashboard to shared's type
@@ -11,7 +12,7 @@ export function useLiveEvents(onEvent: (e: LiveEvent) => void): void {
   cbRef.current = onEvent;
 
   useEffect(() => {
-    const es = new EventSource('/stream');
+    const es = new EventSource(streamUrl('/stream'));
     es.onmessage = (msg) => {
       try {
         const parsed = JSON.parse(msg.data) as LiveEvent;

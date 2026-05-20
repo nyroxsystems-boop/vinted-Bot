@@ -1,0 +1,7 @@
+[
+  {
+    "sel": "[role=\"alert\"]",
+    "text": "Überschrift darf keine Sonderzeichen wie ✨ enthalten.",
+    "html": "<div class=\"web_ui__Validation__validation web_ui__Validation__warning\" role=\"alert\">Überschrift darf keine Sonderzeichen wie ✨ enthalten.</div>"
+  }
+]

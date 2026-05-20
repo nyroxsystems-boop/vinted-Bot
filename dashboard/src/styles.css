@@ -2,26 +2,667 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Design Tokens
+ * Single source of truth — change here, propagates everywhere.
+ * ───────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Surface ladder — light to dark, semantic */
+  --surface-0:   #07070a;   /* viewport / window */
+  --surface-1:   #0a0a0c;   /* sidebar */
+  --surface-2:   #111114;   /* card base */
+  --surface-3:   #16161a;   /* card hover */
+  --surface-4:   #1c1c22;   /* elevated card / modal */
+
+  /* Borders */
+  --border-1:    rgba(255, 255, 255, 0.06);
+  --border-2:    rgba(255, 255, 255, 0.10);
+  --border-3:    rgba(255, 255, 255, 0.16);
+
+  /* Text */
+  --text-1:      #f4f4f5;   /* primary heading */
+  --text-2:      #d4d4d8;   /* body */
+  --text-3:      #a1a1aa;   /* secondary */
+  --text-4:      #71717a;   /* tertiary / labels */
+  --text-5:      #52525b;   /* muted / disabled */
+
+  /* ── Color discipline ────────────────────────────────────────────────────
+   * One accent (ruby) drives everything interactive. Warning + Danger are
+   * the only semantic colors and they only appear when the user needs to
+   * act. Anything else stays in the neutral zinc/text ladder. Tools that
+   * print money look severe, not festive.
+   * ──────────────────────────────────────────────────────────────────────── */
+
+  /* The single brand accent. Use everywhere a "this is live / this is the
+   * primary action" signal is needed. */
+  --accent-ruby:    #f43f5e;
+  --accent-ruby-soft: rgba(244, 63, 94, 0.12);
+  --accent-ruby-ring: rgba(244, 63, 94, 0.35);
+
+  /* Semantic — minimal palette, only for state. */
+  --color-warning:  #f59e0b;  /* amber — action required (CAPTCHA, paused) */
+  --color-danger:   #f43f5e;  /* same hue as ruby for cohesion */
+
+  /* Legacy aliases — kept so existing code compiles. New code should use
+   * --accent-ruby. */
+  --accent-violet:  var(--accent-ruby);
+  --accent-indigo:  var(--accent-ruby);
+  --accent-emerald: var(--accent-ruby);
+  --accent-amber:   var(--color-warning);
+  --accent-rose:    var(--color-danger);
+
+  /* Solid brand color — replaces the old 3-tone rainbow gradient. */
+  --gradient-brand: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --gradient-success: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+
+  /* Shadows — accumulated depth */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-lg:  0 12px 32px rgba(0,0,0,0.45), 0 4px 8px rgba(0,0,0,0.3);
+  --shadow-xl:  0 24px 64px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.4);
+
+  /* Glow effects — used sparingly, only on the primary CTA. */
+  --glow-brand: 0 0 24px rgba(244, 63, 94, 0.20);
+  --glow-emerald: 0 0 24px rgba(244, 63, 94, 0.20);
+
+  /* Easing curves */
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring:     cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Radius */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Base
+ * ───────────────────────────────────────────────────────────────────────── */
+@layer base {
+  html, body, #root {
+    height: 100%;
+    font-feature-settings: 'cv11', 'ss01', 'ss03', 'cv02';
+  }
+  html {
+    scroll-behavior: smooth;
+    /* prevent overscroll glow on Mac */
+    overscroll-behavior: none;
+  }
+  body {
+    color: var(--text-1);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--surface-0);
+    /* No more rainbow orbs in the background — a single subtle ruby gradient
+     * is plenty. Calm canvas lets the data do the talking. */
+    background-image: radial-gradient(circle at 50% -20%, rgba(244, 63, 94, 0.04), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  *:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent-ruby-ring);
+    border-radius: var(--r-sm);
+  }
+
+  ::selection {
+    background: rgba(244, 63, 94, 0.30);
+    color: #fff;
+  }
+
+  /* Variable-number friendliness */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1, 'cv11', 'ss03';
+  }
+
+  /* Display heading — used for hero numbers + page titles */
+  .display {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv11', 'ss01', 'ss03', 'ss07';
+    letter-spacing: -0.02em;
+    font-weight: 800;
+  }
+
+  /* Tighter heading metrics */
+  h1, h2, h3, h4 { letter-spacing: -0.015em; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Components
+ * ───────────────────────────────────────────────────────────────────────── */
 @layer components {
-  .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition;
-  }
-  .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50;
-  }
-  .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
-  }
-  .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700;
-  }
+
+  /* ── Cards — elevation ladder ──────────────────────────────────────── */
   .card {
-    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+    background: var(--surface-2);
+    border: 1px solid var(--border-1);
+    border-radius: var(--r-lg);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 200ms var(--ease-out), background-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out), transform 200ms var(--ease-out);
   }
+  .card-hover {
+    @apply card;
+    cursor: pointer;
+  }
+  .card-hover:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+    box-shadow: var(--shadow-md);
+  }
+  .card-elevated {
+    background: var(--surface-3);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-xl);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-lg);
+  }
+  .card-gradient {
+    @apply card relative overflow-hidden;
+    background:
+      radial-gradient(circle at top right, var(--accent-ruby-soft), transparent 60%),
+      linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  }
+  .card-hero {
+    @apply card relative overflow-hidden;
+    border-radius: var(--r-xl);
+    padding: 1.5rem;
+    background:
+      linear-gradient(135deg, rgba(244, 63, 94, 0.06), transparent 60%),
+      var(--surface-2);
+  }
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 select-none;
+    border-radius: var(--r-md);
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25;
+    transition: all 180ms var(--ease-out);
+    will-change: transform;
+  }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
+
+  .btn-primary {
+    @apply btn text-white;
+    background-image: var(--gradient-brand);
+    background-size: 200% 200%;
+    box-shadow: 0 8px 24px -8px rgba(244, 63, 94, 0.45), 0 0 0 1px rgba(255,255,255,0.06) inset;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-position: 100% 100%;
+    box-shadow: 0 14px 36px -10px rgba(244, 63, 94, 0.6), 0 0 0 1px rgba(255,255,255,0.1) inset;
+  }
+
+  .btn-secondary {
+    @apply btn;
+    background: var(--surface-3);
+    color: var(--text-2);
+    border: 1px solid var(--border-2);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-4);
+    border-color: var(--border-3);
+    color: var(--text-1);
+  }
+
+  .btn-ghost {
+    @apply btn;
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid var(--border-1);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border-2);
+    color: var(--text-1);
+  }
+
+  .btn-danger {
+    @apply btn text-white;
+    background: linear-gradient(120deg, #e11d48, #be123c);
+  }
+  .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+
+  .btn-success {
+    @apply btn text-white;
+    background: var(--accent-ruby);
+    box-shadow: 0 6px 20px -8px rgba(244, 63, 94, 0.45);
+  }
+  .btn-success:hover:not(:disabled) { filter: brightness(1.08); }
+
+  .btn-huge {
+    @apply btn text-white;
+    padding: 1.125rem 2.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: var(--r-xl);
+    background-image: var(--gradient-brand);
+    background-size: 200% 200%;
+    animation: gradient-shift 6s ease infinite;
+    box-shadow: 0 20px 60px -12px rgba(244, 63, 94, 0.6), 0 0 0 1px rgba(255,255,255,0.08) inset;
+  }
+  .btn-huge:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 24px 72px -10px rgba(244, 63, 94, 0.75), 0 0 0 1px rgba(255,255,255,0.12) inset;
+  }
+
+  /* ── Inputs ──────────────────────────────────────────────────────────── */
   .input {
-    @apply w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+    @apply w-full;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--text-1);
+    transition: border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out), background-color 180ms var(--ease-out);
   }
+  .input::placeholder { color: var(--text-5); }
+  .input:hover { border-color: var(--border-3); }
+  .input:focus {
+    outline: none;
+    border-color: var(--accent-ruby);
+    box-shadow: 0 0 0 3px var(--accent-ruby-soft);
+    background: var(--surface-3);
+  }
+
   .label {
-    @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500;
+    @apply mb-1.5 block;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-4);
   }
+
+  /* ── Toggle switch — premium feel ────────────────────────────────────── */
+  .toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    height: 1.5rem;
+    width: 2.75rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: linear-gradient(180deg, #18181c 0%, #0e0e11 100%);
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow:
+      inset 0 1px 2px rgba(0,0,0,0.5),
+      inset 0 0 0 1px rgba(255,255,255,0.02);
+    cursor: pointer;
+    transition: background 240ms var(--ease-out),
+                border-color 240ms var(--ease-out),
+                box-shadow 240ms var(--ease-out);
+  }
+  .toggle:hover {
+    border-color: rgba(255,255,255,0.12);
+  }
+  .toggle[data-on='true'] {
+    background: var(--accent-ruby);
+    border-color: rgba(244, 63, 94, 0.5);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.15) inset,
+      0 -1px 2px rgba(0,0,0,0.15) inset,
+      0 3px 10px -3px rgba(244, 63, 94, 0.50);
+  }
+  .toggle[data-on='true']:hover {
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.18) inset,
+      0 -1px 2px rgba(0,0,0,0.15) inset,
+      0 4px 14px -3px rgba(244, 63, 94, 0.60);
+  }
+  .toggle-thumb {
+    pointer-events: none;
+    display: inline-block;
+    height: 1.125rem;
+    width: 1.125rem;
+    transform: translateX(2px);
+    border-radius: 9999px;
+    background: linear-gradient(180deg, #ffffff 0%, #ededf0 100%);
+    box-shadow:
+      0 2px 5px rgba(0,0,0,0.5),
+      0 1px 2px rgba(0,0,0,0.35),
+      0 0 0 0.5px rgba(0,0,0,0.10),
+      0 1px 0 rgba(255,255,255,0.7) inset;
+    transition: transform 280ms var(--ease-spring);
+  }
+  .toggle[data-on='true'] .toggle-thumb {
+    transform: translateX(22px);
+  }
+  .toggle:focus-visible {
+    outline: none;
+    box-shadow:
+      inset 0 1px 2px rgba(0,0,0,0.5),
+      0 0 0 2px var(--surface-0),
+      0 0 0 4px rgba(244, 63, 94, 0.55);
+  }
+  .toggle[data-disabled='true'] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* ── Pill (selectable chip) ──────────────────────────────────────────── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    border: 1px solid;
+    cursor: pointer;
+    user-select: none;
+    transition: all 180ms var(--ease-out);
+  }
+  .pill-off {
+    @apply pill;
+    border-color: var(--border-2);
+    background: var(--surface-2);
+    color: var(--text-3);
+  }
+  .pill-off:hover {
+    border-color: var(--border-3);
+    color: var(--text-1);
+    background: var(--surface-3);
+  }
+  .pill-on {
+    @apply pill;
+    border-color: var(--accent-ruby-ring);
+    background: var(--accent-ruby-soft);
+    color: rgb(253, 164, 175);
+  }
+
+  /* ── Badges ──────────────────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center gap-1.5;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    line-height: 1.4;
+  }
+  .badge-good {
+    @apply badge;
+    background: rgba(244, 63, 94, 0.10);
+    color: rgb(253, 164, 175);
+    box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.22) inset;
+  }
+  .badge-warn {
+    @apply badge;
+    background: rgba(245, 158, 11, 0.12);
+    color: rgb(252, 211, 77);
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25) inset;
+  }
+  .badge-bad {
+    @apply badge;
+    background: rgba(244, 63, 94, 0.12);
+    color: rgb(253, 164, 175);
+    box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.25) inset;
+  }
+  .badge-info {
+    @apply badge;
+    background: rgba(244, 63, 94, 0.08);
+    color: rgb(253, 164, 175);
+    box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.18) inset;
+  }
+  .badge-muted {
+    @apply badge;
+    background: rgba(82, 82, 91, 0.4);
+    color: var(--text-3);
+  }
+
+  /* ── Status dots with glow ───────────────────────────────────────────── */
+  .dot { display: inline-block; height: 0.5rem; width: 0.5rem; border-radius: 9999px; }
+  .dot-good {
+    @apply dot;
+    background: var(--accent-ruby);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.55);
+  }
+  .dot-warn {
+    @apply dot;
+    background: var(--accent-amber);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+  }
+  .dot-bad {
+    @apply dot;
+    background: var(--accent-rose);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.6);
+  }
+  .dot-muted { @apply dot; background: var(--text-5); }
+  .dot-pulse { animation: dot-pulse 2.2s ease-in-out infinite; }
+
+  /* ── KPI display ─────────────────────────────────────────────────────── */
+  .kpi-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-4);
+  }
+  .kpi-value {
+    @apply tabular display;
+    font-size: 1.875rem;
+    line-height: 1;
+    color: var(--text-1);
+  }
+  .kpi-value-lg {
+    @apply tabular display;
+    font-size: 3rem;
+    line-height: 1;
+    color: var(--text-1);
+    letter-spacing: -0.03em;
+  }
+  .kpi-value-xl {
+    @apply tabular display;
+    font-size: 4rem;
+    line-height: 0.95;
+    color: var(--text-1);
+    letter-spacing: -0.035em;
+  }
+
+  /* ── Tables ──────────────────────────────────────────────────────────── */
+  .tbl { @apply w-full text-sm; }
+  .tbl thead th {
+    padding: 0.625rem 0.75rem;
+    text-align: left;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-4);
+    border-bottom: 1px solid var(--border-1);
+  }
+  .tbl tbody td {
+    padding: 0.75rem;
+    color: var(--text-2);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .tbl tbody tr {
+    transition: background 150ms var(--ease-out);
+  }
+  .tbl tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  /* ── Section heading ─────────────────────────────────────────────────── */
+  .h-section {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text-4);
+  }
+
+  /* ── Page title (consistent everywhere) ──────────────────────────────── */
+  .page-title {
+    @apply display;
+    font-size: 1.875rem;
+    line-height: 1.1;
+    color: var(--text-1);
+    letter-spacing: -0.02em;
+  }
+  .page-subtitle {
+    margin-top: 0.375rem;
+    font-size: 0.875rem;
+    color: var(--text-3);
+  }
+
+  /* ── Skeleton ────────────────────────────────────────────────────────── */
+  .skeleton {
+    border-radius: var(--r-md);
+    background: linear-gradient(
+      90deg,
+      var(--surface-2) 0%,
+      var(--surface-3) 50%,
+      var(--surface-2) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+
+  /* ── Keyboard ────────────────────────────────────────────────────────── */
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border-2);
+    background: var(--surface-2);
+    color: var(--text-3);
+    padding: 0.125rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.625rem;
+    font-weight: 500;
+    line-height: 1.2;
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Animations
+ * ───────────────────────────────────────────────────────────────────────── */
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.fade-in   { animation: fade-up 260ms var(--ease-out) both; }
+.scale-in  { animation: scale-in 200ms var(--ease-out) both; }
+.pulse-bg  { animation: pulse-bg 3s ease-in-out infinite; }
+
+@keyframes pulse-bg {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 0.6; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Scrollbar — slim, premium
+ * ───────────────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.4);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 200ms var(--ease-out);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.7);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(82, 82, 91, 0.4) transparent;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Premium glow effect — for hero CTAs
+ * ───────────────────────────────────────────────────────────────────────── */
+.glow-cta {
+  position: relative;
+  z-index: 0;
+}
+.glow-cta::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  background: var(--gradient-brand);
+  background-size: 200% 200%;
+  border-radius: inherit;
+  filter: blur(18px);
+  opacity: 0.5;
+  z-index: -1;
+  transition: opacity 280ms var(--ease-out), filter 280ms var(--ease-out);
+  animation: gradient-shift 6s ease infinite;
+}
+.glow-cta:hover::before {
+  opacity: 0.85;
+  filter: blur(24px);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Subtle noise overlay — adds premium texture, kept very faint
+ * ───────────────────────────────────────────────────────────────────────── */
+.noise-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.03;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * View-transition helper — soft fade between routes
+ *
+ * IMPORTANT: animate opacity only, never `transform`. Any non-`none` transform
+ * on an ancestor turns that ancestor into the containing block for fixed-
+ * positioned descendants — and that breaks every modal/lightbox that lives
+ * under `<main>` (DetailModal, lightbox, command palette etc.). Learned the
+ * hard way when listings cards opened off-screen.
+ * ───────────────────────────────────────────────────────────────────────── */
+.route-fade > * {
+  animation: fade-in 220ms var(--ease-out) both;
 }

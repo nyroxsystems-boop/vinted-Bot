@@ -10,7 +10,16 @@
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
-type ServiceName = 'orchestrator' | 'vinted-bot' | 'temu-bot' | 'dashboard' | 'supervisor';
+type ServiceName =
+  | 'orchestrator'
+  | 'vinted-bot'
+  | 'temu-bot'
+  | 'kleinanzeigen-bot'
+  | 'mercari-bot'
+  | 'depop-bot'
+  | 'wallapop-bot'
+  | 'dashboard'
+  | 'supervisor';
 type ServiceState = 'starting' | 'running' | 'exited' | 'failed';
 
 interface StatusPayload {
@@ -43,7 +52,15 @@ interface ServiceLocal {
   logs: LogPayload[];
 }
 
-const SERVICES: ServiceName[] = ['orchestrator', 'vinted-bot', 'temu-bot', 'dashboard'];
+const SERVICES: ServiceName[] = [
+  'orchestrator',
+  'vinted-bot',
+  'kleinanzeigen-bot',
+  'mercari-bot',
+  'depop-bot',
+  'wallapop-bot',
+  'temu-bot',
+];
 const MAX_LOG_LINES = 2000;
 
 const state: Record<ServiceName, ServiceLocal> = {} as Record<ServiceName, ServiceLocal>;
@@ -303,7 +320,7 @@ $btnFullRestart.addEventListener('click', async () => {
     alert(
       `Neustart fehlgeschlagen: ${e}\n\n` +
       `Mach's manuell im Terminal:\n` +
-      `  cd /Users/home/Desktop/Partsunion/Vinted-System\n` +
+      `  cd /Users/home/Vinted/system\n` +
       `  git pull && npm install && npm run app:dev`,
     );
   }

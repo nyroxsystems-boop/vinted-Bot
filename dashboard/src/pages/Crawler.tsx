@@ -9,11 +9,13 @@ import {
   ExternalLink,
   CheckCircle2,
   AlertTriangle,
+  Square,
 } from 'lucide-react';
 import {
   usePresets,
   useCrawledProducts,
   runCrawl,
+  stopCrawl,
   type CrawlerFilters,
 } from '../hooks/useCrawler';
 
@@ -58,7 +60,7 @@ export function CrawlerPage() {
       return;
     }
     setBusy(true);
-    setLastResult(`⏳ Crawle ${queries.length} Query${queries.length > 1 ? 's' : ''}…`);
+    setLastResult(`Crawle ${queries.length} Query${queries.length > 1 ? 's' : ''}…`);
     try {
       const r = await runCrawl({ queries, filters, presetName });
       const totalKept = r.results.reduce((s, x) => s + x.kept, 0);
@@ -77,8 +79,8 @@ export function CrawlerPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Katalog · Temu-Crawler</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="text-2xl font-bold text-zinc-100">Katalog · Temu-Crawler</h1>
+        <p className="mt-1 text-sm text-zinc-400">
           Sucht Temu nach Produkten, filtert nach Bewertung/Preis, legt Ordner + Antigravity-Queue
           an. Alles läuft dann automatisch durch die Pipeline.
         </p>
@@ -107,7 +109,7 @@ export function CrawlerPage() {
             ))}
           </select>
           {selectedPreset && presetsBundle && (
-            <div className="mt-2 max-h-32 overflow-y-auto rounded bg-slate-50 p-2 text-xs text-slate-600">
+            <div className="mt-2 max-h-32 overflow-y-auto rounded bg-zinc-900/60 p-2 text-xs text-zinc-300">
               {presetsBundle.presets
                 .find((p) => p.name === selectedPreset)
                 ?.queries.map((q, i) => (
@@ -167,18 +169,35 @@ export function CrawlerPage() {
 
         {/* Action */}
         <div className="flex items-center justify-between gap-2">
-          {lastResult && <div className="text-sm text-slate-600">{lastResult}</div>}
-          <button className="btn-primary" disabled={busy} onClick={handleRun}>
-            {busy ? (
-              <>
-                <Loader2 size={14} className="animate-spin" /> Crawling…
-              </>
-            ) : (
-              <>
-                <Search size={14} /> Crawl starten
-              </>
+          {lastResult && <div className="text-sm text-zinc-300">{lastResult}</div>}
+          <div className="flex items-center gap-2">
+            {busy && (
+              <button
+                className="btn-danger"
+                onClick={async () => {
+                  try {
+                    await stopCrawl();
+                    setLastResult('⏹ Stop gesendet — Crawler bricht nach dem aktuellen Produkt ab.');
+                  } catch (e) {
+                    setLastResult(`✗ Stop fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`);
+                  }
+                }}
+              >
+                <Square size={14} /> Crawl stoppen
+              </button>
             )}
-          </button>
+            <button className="btn-primary" disabled={busy} onClick={handleRun}>
+              {busy ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Crawling…
+                </>
+              ) : (
+                <>
+                  <Search size={14} /> Crawl starten
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -187,7 +206,7 @@ export function CrawlerPage() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-semibold">
             Gecrawlte Produkte{' '}
-            <span className="ml-1 rounded-full bg-slate-200 px-2 text-xs text-slate-700">
+            <span className="ml-1 rounded-full bg-zinc-800 px-2 text-xs text-zinc-200">
               {products.length}
             </span>
           </h2>
@@ -195,9 +214,9 @@ export function CrawlerPage() {
             Aktualisieren
           </button>
         </div>
-        {loading && <div className="text-sm text-slate-400">Lade…</div>}
+        {loading && <div className="text-sm text-zinc-500">Lade…</div>}
         {!loading && products.length === 0 && (
-          <div className="rounded bg-slate-50 p-6 text-center text-sm text-slate-500">
+          <div className="rounded bg-zinc-900/60 p-6 text-center text-sm text-zinc-400">
             Noch keine gecrawlten Produkte. Starte einen Crawl oben.
           </div>
         )}
@@ -205,7 +224,7 @@ export function CrawlerPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wider text-slate-500">
+                <tr className="border-b text-left text-xs uppercase tracking-wider text-zinc-400">
                   <th className="py-2">Titel</th>
                   <th>Preis</th>
                   <th>Rating</th>
@@ -225,7 +244,7 @@ export function CrawlerPage() {
                     <td>{p.price_eur != null ? `€${p.price_eur.toFixed(2)}` : '—'}</td>
                     <td>{p.rating != null ? p.rating.toFixed(1) : '—'}</td>
                     <td>{p.review_count ?? '—'}</td>
-                    <td className="max-w-[160px] truncate text-xs text-slate-500">
+                    <td className="max-w-[160px] truncate text-xs text-zinc-400">
                       {p.search_query}
                     </td>
                     <td className="font-mono text-xs">
@@ -284,12 +303,12 @@ function FilterField(props: {
 
 function StatusBadge({ status }: { status: string }) {
   const cls: Record<string, string> = {
-    crawled: 'bg-slate-100 text-slate-700',
+    crawled: 'bg-slate-100 text-zinc-200',
     generating: 'bg-amber-100 text-amber-800',
     ready: 'bg-brand-100 text-brand-700',
     listed: 'bg-green-100 text-green-800',
-    sold: 'bg-emerald-200 text-emerald-900',
-    archived: 'bg-slate-200 text-slate-500',
+    sold: 'bg-rose-200 text-rose-900',
+    archived: 'bg-zinc-800 text-zinc-400',
   };
   const icon: Record<string, JSX.Element> = {
     ready: <CheckCircle2 size={10} />,
@@ -299,7 +318,7 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex items-center gap-0.5 rounded px-2 py-0.5 text-[11px] font-medium ${
-        cls[status] ?? 'bg-slate-100 text-slate-700'
+        cls[status] ?? 'bg-slate-100 text-zinc-200'
       }`}
     >
       {icon[status]}

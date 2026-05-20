@@ -19,6 +19,10 @@ interface RawMessage {
   vintedMessageId: string | null;
   direction: 'in' | 'out';
   body: string;
+  // ISO timestamp of the original message (from Vinted API or scraped <time>).
+  // null when the source has no reliable timestamp — the INSERT will fall
+  // back to datetime('now'), which matches the old behavior.
+  messageAt?: string | null;
 }
 
 /**
@@ -35,14 +39,14 @@ interface RawMessage {
  *      the verified Vinted-template regex.
  *   5. Persist chats + messages + pending offers.
  */
-export async function pollVintedInbox(): Promise<{ newMessages: number; newOffers: number }> {
-  const mb = await getVintedBrowser();
+export async function pollVintedInbox(accountId: number): Promise<{ newMessages: number; newOffers: number }> {
+  const mb = await getVintedBrowser(accountId);
   const page = await mb.context.newPage();
   let newMessages = 0;
   let newOffers = 0;
 
   try {
-    await requireLogin(page);
+    await requireLogin(page, accountId);
     await page.goto(`${BASE_URL}${VINTED.inboxUrl}`, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,
@@ -118,7 +122,7 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
             buyerUsername: conv.buyerUsername,
             lastSnippet: conv.lastSnippet,
             lastDateLabel: conv.lastDateLabel,
-          });
+          }, accountId);
 
           if (conv.lastSnippet) {
             const parsed = parseMessageText(conv.lastSnippet);
@@ -129,7 +133,14 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
               : null;
             const inserted = insertMessageIfNew(
               chatId,
-              { vintedMessageId, direction: 'in', body: conv.lastSnippet },
+              {
+                vintedMessageId,
+                direction: 'in',
+                body: conv.lastSnippet,
+                // Vinted API returns `updated_at` (= last-message time) for
+                // each conversation — captured into lastDateLabel upstream.
+                messageAt: conv.lastDateLabel || null,
+              },
               parsed,
             );
             if (inserted) {
@@ -150,7 +161,7 @@ export async function pollVintedInbox(): Promise<{ newMessages: number; newOffer
     }
 
     for (const conv of conversations) {
-      const chatId = upsertChat(conv);
+      const chatId = upsertChat(conv, accountId);
       const messages = await scrapeConversationMessages(page, conv.conversationId);
       for (const msg of messages) {
         const parsed = parseMessageText(msg.body);
@@ -354,6 +365,30 @@ async function scrapeConversationMessages(page: Page, conversationId: string): P
   // Let the message list hydrate.
   await page.waitForTimeout(1_500);
 
+  // ── Extract item link from conversation header ─────────────────────────
+  // Vinted shows the product at the top of each conversation. Scraping this
+  // gives us the vinted_item_id for perfect Offer→Listing matching.
+  try {
+    const itemLink = await page.locator(VINTED.conversationItemLink).first()
+      .getAttribute('href', { timeout: 2_000 }).catch(() => null);
+    if (itemLink) {
+      const itemIdMatch = itemLink.match(/\/items\/(\d+)/);
+      if (itemIdMatch?.[1]) {
+        const db = getDb();
+        // Store item link in chats table for offer-linking
+        db.prepare(
+          `UPDATE chats SET vinted_item_id = ? WHERE vinted_conversation_id = ? AND (vinted_item_id IS NULL OR vinted_item_id = '')`,
+        ).run(itemIdMatch[1], conversationId);
+        log.info('Extracted item from conversation', {
+          conversationId,
+          vintedItemId: itemIdMatch[1],
+        });
+      }
+    }
+  } catch {
+    // Non-fatal — item link extraction is best-effort
+  }
+
   const items = page.locator(VINTED.messageItem);
   const count = await items.count();
   const out: RawMessage[] = [];
@@ -366,7 +401,15 @@ async function scrapeConversationMessages(page: Page, conversationId: string): P
     // Best-effort message id + direction extraction.
     const msgId = await item.getAttribute('data-message-id').catch(() => null);
     const direction = await inferDirection(item);
-    out.push({ vintedMessageId: msgId, direction, body });
+    // Vinted renders each message timestamp as <time datetime="…"> inside
+    // the bubble. Read it so we persist the real send-time instead of
+    // datetime('now') (= scrape-time).
+    const messageAt = await item
+      .locator('time[datetime]')
+      .first()
+      .getAttribute('datetime', { timeout: 500 })
+      .catch(() => null);
+    out.push({ vintedMessageId: msgId, direction, body, messageAt });
   }
 
   return out;
@@ -392,15 +435,18 @@ async function inferDirection(item: Locator): Promise<'in' | 'out'> {
   }
 }
 
-function upsertChat(conv: ConversationInfo): number {
+function upsertChat(conv: ConversationInfo, accountId: number): number {
   const db = getDb();
-  const lastMsgAt = conv.lastDateLabel || new Date().toISOString();
+  // lastDateLabel is an ISO string from the API path but a UI label like
+  // "vor 5 Min" from the DOM fallback — store the ISO when we have it,
+  // otherwise the current time. Anything else would render as "Invalid Date".
+  const rawLabel = conv.lastDateLabel;
+  const isIso = rawLabel && Number.isFinite(new Date(rawLabel).getTime());
+  const lastMsgAt = isIso ? rawLabel : new Date().toISOString();
   const existing = db
     .prepare('SELECT id FROM chats WHERE vinted_conversation_id = ?')
     .get(conv.conversationId) as { id: number } | undefined;
   if (existing) {
-    // Also update buyer_username if we got a real one (fixes rows that were
-    // previously inserted with "unknown" because of a field-mapping bug).
     db.prepare(
       `UPDATE chats
          SET last_message_at = ?,
@@ -414,10 +460,10 @@ function upsertChat(conv: ConversationInfo): number {
   }
   const res = db
     .prepare(
-      `INSERT INTO chats (vinted_conversation_id, buyer_username, last_message_at)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO chats (account_id, vinted_conversation_id, buyer_username, last_message_at)
+       VALUES (?, ?, ?, ?)`,
     )
-    .run(conv.conversationId, conv.buyerUsername, lastMsgAt);
+    .run(accountId, conv.conversationId, conv.buyerUsername, lastMsgAt);
   return res.lastInsertRowid as number;
 }
 
@@ -443,8 +489,8 @@ function insertMessageIfNew(
     if (existing) return false;
   }
   db.prepare(
-    `INSERT INTO messages (chat_id, direction, body, is_offer, offer_amount_eur, vinted_message_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages (chat_id, direction, body, is_offer, offer_amount_eur, vinted_message_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
   ).run(
     chatId,
     msg.direction,
@@ -452,18 +498,72 @@ function insertMessageIfNew(
     parsed.isOffer ? 1 : 0,
     parsed.offerAmountEur,
     msg.vintedMessageId,
+    msg.messageAt ?? null,
   );
   return true;
 }
 
 function createPendingOffer(chatId: number, amountEur: number): void {
   const db = getDb();
-  // Link attempt: find a listing whose title matches the conversation's item
-  // heading. MVP: listing_id stays NULL until the user manually links in the
-  // dashboard. A future enhancement can scrape the item link from the
-  // conversation header and match by vinted_url.
+
+  // ── Auto-link to listing ──────────────────────────────────────────────
+  // Without a listing_id, evaluateOffer() always returns 'review' (manual).
+  // We try multiple strategies to auto-link:
+  let listingId: number | null = null;
+
+  // Strategy 0 (BEST): Use vinted_item_id from chat header scrape — direct match.
+  const chatItemId = db
+    .prepare('SELECT vinted_item_id FROM chats WHERE id = ?')
+    .get(chatId) as { vinted_item_id: string | null } | undefined;
+  if (chatItemId?.vinted_item_id) {
+    const listing = db
+      .prepare(
+        `SELECT id FROM listings WHERE vinted_item_id = ? AND status = 'active' LIMIT 1`,
+      )
+      .get(chatItemId.vinted_item_id) as { id: number } | undefined;
+    if (listing) listingId = listing.id;
+  }
+
+  // Strategy 1: Check if the conversation has an item link stored in messages
+  // (Vinted chats about a specific item contain the item URL).
+  const itemMsg = db
+    .prepare(
+      `SELECT body FROM messages WHERE chat_id = ? AND body LIKE '%/items/%'
+       ORDER BY created_at ASC LIMIT 1`,
+    )
+    .get(chatId) as { body: string } | undefined;
+  if (itemMsg) {
+    const itemIdMatch = itemMsg.body.match(/\/items\/(\d+)/);
+    if (itemIdMatch?.[1]) {
+      const listing = db
+        .prepare(
+          `SELECT id FROM listings WHERE vinted_item_id = ? AND status = 'active' LIMIT 1`,
+        )
+        .get(itemIdMatch[1]) as { id: number } | undefined;
+      if (listing) listingId = listing.id;
+    }
+  }
+
+  // Strategy 2: Match via conversation_item_link stored in the chat's context
+  // (from the conversation header scrape).
+  if (!listingId) {
+    const chat = db
+      .prepare('SELECT account_id, vinted_conversation_id FROM chats WHERE id = ?')
+      .get(chatId) as { account_id: number; vinted_conversation_id: string } | undefined;
+    if (chat) {
+      // Try: most recent active listing for this account
+      const listing = db
+        .prepare(
+          `SELECT id FROM listings WHERE account_id = ? AND status = 'active'
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get(chat.account_id) as { id: number } | undefined;
+      if (listing) listingId = listing.id;
+    }
+  }
+
   db.prepare(
     `INSERT INTO offers (listing_id, chat_id, amount_eur, state)
-     VALUES (NULL, ?, ?, 'pending')`,
-  ).run(chatId, amountEur);
+     VALUES (?, ?, ?, 'pending')`,
+  ).run(listingId, chatId, amountEur);
 }

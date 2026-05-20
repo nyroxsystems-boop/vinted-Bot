@@ -8,7 +8,11 @@ import { markOfferDecided } from './evaluate.js';
 const log = createLogger('vinted-decline');
 const BASE_URL = process.env.VINTED_BASE_URL ?? 'https://www.vinted.de';
 
-export async function declineOffer(offer: Offer, decidedBy: 'auto' | 'manual'): Promise<{
+export async function declineOffer(
+  offer: Offer,
+  decidedBy: 'auto' | 'manual',
+  accountId: number,
+): Promise<{
   ok: boolean;
   error?: string;
 }> {
@@ -18,10 +22,10 @@ export async function declineOffer(offer: Offer, decidedBy: 'auto' | 'manual'): 
     .get(offer.chat_id) as { vinted_conversation_id: string } | undefined;
   if (!chat) return { ok: false, error: 'Chat not found' };
 
-  const mb = await getVintedBrowser();
+  const mb = await getVintedBrowser(accountId);
   const page = await mb.context.newPage();
   try {
-    await requireLogin(page);
+    await requireLogin(page, accountId);
     await page.goto(`${BASE_URL}/inbox/${chat.vinted_conversation_id}`, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,

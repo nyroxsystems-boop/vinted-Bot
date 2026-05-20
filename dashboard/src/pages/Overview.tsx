@@ -24,7 +24,7 @@ export function OverviewPage() {
   const { data: auth } = useAuthStatus(5000);
 
   const paused = settings.paused === 'true';
-  const loginNeeded = auth ? anyBotNeedsLogin(auth) : null;
+  const loginNeeded = auth ? anyBotNeedsLogin(auth) : [];
 
   const totals = daily.reduce(
     (a, d) => ({ paid: a.paid + d.paid, revenue: a.revenue + d.revenue_eur }),
@@ -36,11 +36,11 @@ export function OverviewPage() {
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Übersicht</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <h1 className="text-2xl font-bold text-zinc-100">Übersicht</h1>
+          <p className="mt-1 text-sm text-zinc-400">
             {paused
               ? 'System ist pausiert — Bots machen nichts.'
-              : 'System läuft — Bots pollen Vinted automatisch.'}
+              : 'System läuft — Bots pollen alle Marktplätze automatisch.'}
           </p>
         </div>
         <button
@@ -61,20 +61,18 @@ export function OverviewPage() {
 
       {error && <div className="card text-red-600">{error}</div>}
 
-      {loginNeeded && (
+      {loginNeeded.length > 0 && (
         <Link
           to="/settings"
-          className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 hover:bg-amber-100"
+          className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-500/10 p-3 text-sm text-amber-900 hover:bg-amber-100"
         >
           <KeyRound size={18} />
           <div className="flex-1">
             <div className="font-semibold">Login benötigt</div>
             <div className="text-xs">
-              {loginNeeded === 'both'
-                ? 'Vinted- und Temu-Session sind abgelaufen oder nie eingerichtet.'
-                : loginNeeded === 'vinted'
-                  ? 'Vinted-Session ist abgelaufen oder nie eingerichtet.'
-                  : 'Temu-Session ist abgelaufen oder nie eingerichtet.'}{' '}
+              {loginNeeded.length === 1
+                ? `${loginNeeded[0]}-Session ist abgelaufen oder nie eingerichtet.`
+                : `${loginNeeded.length} Plattformen brauchen Login: ${loginNeeded.join(', ')}`}{' '}
               → Einstellungen öffnen.
             </div>
           </div>
@@ -133,11 +131,11 @@ export function OverviewPage() {
         </div>
         <div className="mb-3 flex gap-6 text-sm">
           <span>
-            <span className="text-slate-500">Umsatz:</span>{' '}
+            <span className="text-zinc-400">Umsatz:</span>{' '}
             <span className="font-bold">€{totals.revenue.toFixed(2)}</span>
           </span>
           <span>
-            <span className="text-slate-500">Verkäufe:</span>{' '}
+            <span className="text-zinc-400">Verkäufe:</span>{' '}
             <span className="font-bold">{totals.paid}</span>
           </span>
         </div>
@@ -188,15 +186,15 @@ function Kpi(props: {
     <div
       className={`card transition ${
         props.to ? 'cursor-pointer hover:shadow-md' : ''
-      } ${props.emphasis ? 'border-amber-300 bg-amber-50/50' : ''}`}
+      } ${props.emphasis ? 'border-amber-300 bg-amber-500/10/50' : ''}`}
     >
-      <div className="mb-1 flex items-center gap-1.5 text-slate-500">
-        <span className="flex h-5 w-5 items-center justify-center rounded bg-slate-100">
+      <div className="mb-1 flex items-center gap-1.5 text-zinc-400">
+        <span className="flex h-5 w-5 items-center justify-center rounded bg-zinc-800">
           {props.icon}
         </span>
         <span className="label m-0">{props.label}</span>
       </div>
-      <div className={`text-3xl font-bold ${props.danger ? 'text-red-600' : 'text-slate-900'}`}>
+      <div className={`text-3xl font-bold ${props.danger ? 'text-red-600' : 'text-zinc-100'}`}>
         {props.value}
       </div>
     </div>
@@ -210,7 +208,7 @@ function BotCard(props: { title: string; status: unknown }) {
       <div className="mb-2 flex items-center justify-between">
         <h2 className="font-semibold">{props.title}</h2>
       </div>
-      <pre className="max-h-48 overflow-auto rounded bg-slate-50 p-2 text-[11px] text-slate-700">
+      <pre className="max-h-48 overflow-auto rounded bg-zinc-900/40 p-2 text-[11px] text-zinc-300">
         {JSON.stringify(props.status, null, 2)}
       </pre>
     </div>

@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(60% 50% at 30% 0%, rgba(225, 29, 72, 0.12), transparent 60%),
+      radial-gradient(40% 35% at 80% 10%, rgba(139, 92, 246, 0.10), transparent 60%),
+      #0a0a0c;
+    background-attachment: fixed;
+  }
+  *:focus-visible {
+    outline: 2px solid rgba(244, 63, 94, 0.6);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: rgba(225, 29, 72, 0.35);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .container-narrow { @apply mx-auto w-full max-w-6xl px-6; }
+  .container-mid    { @apply mx-auto w-full max-w-4xl px-6; }
+
+  .h-display {
+    @apply font-display text-5xl font-extrabold tracking-tight text-white sm:text-6xl md:text-7xl;
+    letter-spacing: -0.025em;
+  }
+  .h-section {
+    @apply font-display text-3xl font-bold tracking-tight text-white sm:text-4xl;
+    letter-spacing: -0.02em;
+  }
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border border-ruby-500/40 bg-ruby-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ruby-300;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed select-none;
+  }
+  .btn-primary {
+    @apply btn text-white shadow-2xl shadow-ruby-700/40;
+    background-image: linear-gradient(120deg, #f43f5e 0%, #8b5cf6 60%, #6366f1 100%);
+    background-size: 200% 200%;
+    animation: gradient-x 8s ease infinite;
+  }
+  .btn-primary:hover { box-shadow: 0 0 40px rgba(244, 63, 94, 0.45); }
+  .btn-ghost {
+    @apply btn border border-white/10 bg-white/[0.03] text-zinc-100 hover:bg-white/[0.07] hover:border-white/20 backdrop-blur;
+  }
+  .btn-link {
+    @apply inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-300 hover:text-white transition;
+  }
+
+  .card-glass {
+    @apply rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-md;
+  }
+  .card-pricing {
+    @apply card-glass relative flex flex-col gap-6 transition;
+  }
+  .card-pricing:hover { @apply border-white/20; }
+  .card-pricing[data-featured='true'] {
+    @apply border-ruby-500/40 bg-ruby-500/[0.04];
+    box-shadow: 0 0 60px -10px rgba(244, 63, 94, 0.25);
+  }
+
+  .gradient-text {
+    background: linear-gradient(120deg, #fb7185 0%, #c084fc 50%, #818cf8 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .ring-glow {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 30px 80px -20px rgba(225, 29, 72, 0.35);
+  }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(63, 63, 70, 0.5); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(82, 82, 91, 0.8); background-clip: padding-box; border: 2px solid transparent; }
+* { scrollbar-width: thin; scrollbar-color: rgba(63, 63, 70, 0.5) transparent; }
+
+/* Decorative grid pattern */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 35%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 35%, transparent 80%);
+}
+
+/* Premium ruby range-slider — used by ProfitCalculator. Native styling
+ * is ugly on every browser, so we paint thumb + track ourselves. */
+.slider-ruby {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 28px;
+}
+.slider-ruby::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0.45) 0%, rgba(244, 63, 94, 0.45) var(--val, 50%), rgba(255,255,255,0.08) var(--val, 50%));
+}
+.slider-ruby::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+}
+.slider-ruby::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(244, 63, 94, 0.55);
+}
+.slider-ruby::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #ededf0 100%);
+  border: 2px solid #f43f5e;
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.45), 0 1px 2px rgba(0,0,0,0.4);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.slider-ruby::-webkit-slider-thumb:hover { transform: scale(1.1); box-shadow: 0 4px 14px rgba(244, 63, 94, 0.6); }
+.slider-ruby::-webkit-slider-thumb:active { transform: scale(0.96); }
+.slider-ruby::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #ededf0 100%);
+  border: 2px solid #f43f5e;
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.45);
+}

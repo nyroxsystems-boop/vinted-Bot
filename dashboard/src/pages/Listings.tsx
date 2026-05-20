@@ -18,7 +18,7 @@ export function ListingsPage() {
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b text-left text-xs uppercase tracking-wider text-slate-500">
+            <tr className="border-b text-left text-xs uppercase tracking-wider text-zinc-400">
               <th className="py-2">Titel</th>
               <th>Listpreis</th>
               <th>Min. Accept</th>
@@ -31,14 +31,14 @@ export function ListingsPage() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} className="py-4 text-center text-slate-400">
+                <td colSpan={7} className="py-4 text-center text-zinc-500">
                   Lade…
                 </td>
               </tr>
             )}
             {!loading && listings.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-4 text-center text-slate-400">
+                <td colSpan={7} className="py-4 text-center text-zinc-500">
                   Noch keine Listings angelegt.
                 </td>
               </tr>
@@ -47,13 +47,13 @@ export function ListingsPage() {
               <tr key={l.id} className="border-b last:border-0">
                 <td className="py-2">
                   <div className="font-medium">{l.title}</div>
-                  <div className="text-xs text-slate-500">{l.vinted_url}</div>
+                  <div className="text-xs text-zinc-400">{l.vinted_url}</div>
                 </td>
                 <td>€{l.list_price_eur.toFixed(2)}</td>
                 <td className="font-semibold text-brand-700">
                   €{l.min_accept_price_eur.toFixed(2)}
                 </td>
-                <td className="max-w-[220px] truncate text-xs text-slate-500">
+                <td className="max-w-[220px] truncate text-xs text-zinc-400">
                   {l.temu_url ?? <span className="text-amber-600">— fehlt —</span>}
                 </td>
                 <td>
@@ -100,9 +100,9 @@ export function ListingsPage() {
 function StatusBadge({ status }: { status: Listing['status'] }) {
   const cls: Record<Listing['status'], string> = {
     active: 'bg-green-100 text-green-800',
-    paused: 'bg-slate-200 text-slate-700',
+    paused: 'bg-zinc-800 text-zinc-300',
     sold: 'bg-brand-100 text-brand-700',
-    archived: 'bg-slate-100 text-slate-500',
+    archived: 'bg-zinc-800 text-zinc-400',
   };
   return (
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls[status]}`}>{status}</span>
@@ -133,7 +133,7 @@ function ListingEditor(props: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl">
+      <div className="w-full max-w-2xl rounded-lg bg-zinc-900/60 p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">
             {props.initial.id ? 'Listing bearbeiten' : 'Neues Listing'}

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Rich vertical gradient — sky → deep blue -->
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#7dd3fc"/>
+      <stop offset="25%"  stop-color="#3b82f6"/>
+      <stop offset="70%"  stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+
+    <!-- Soft glossy highlight hugging the top-left edge -->
+    <radialGradient id="sheen" cx="30%" cy="10%" r="80%" fx="30%" fy="10%">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.40"/>
+      <stop offset="40%" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle inner shadow around the edges -->
+    <radialGradient id="vignette" cx="50%" cy="50%" r="60%">
+      <stop offset="70%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.18"/>
+    </radialGradient>
+
+    <!-- Metallic sheen gradient for the V -->
+    <linearGradient id="vgrad" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="55%"  stop-color="#f5f9ff"/>
+      <stop offset="100%" stop-color="#cfe0ff"/>
+    </linearGradient>
+
+    <!-- Soft drop shadow behind the V -->
+    <filter id="vshadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="10" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Subtle drop shadow behind the plate itself (for the Dock look) -->
+    <filter id="platedrop" x="-5%" y="-5%" width="110%" height="115%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="14" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.30"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- macOS-style squircle plate (22.37% corner radius = Apple's magic number) -->
+  <g filter="url(#platedrop)">
+    <rect x="72" y="72" width="880" height="880" rx="197" ry="197" fill="url(#plate)"/>
+    <rect x="72" y="72" width="880" height="880" rx="197" ry="197" fill="url(#sheen)"/>
+    <rect x="72" y="72" width="880" height="880" rx="197" ry="197" fill="url(#vignette)"/>
+    <!-- Very thin inner stroke for a "lit" edge -->
+    <rect x="74" y="74" width="876" height="876" rx="195" ry="195"
+          fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2"/>
+  </g>
+
+  <!-- Oversized stylised "V" — occupies ~60% of the plate -->
+  <g filter="url(#vshadow)">
+    <!-- Left stroke of the V, slightly thicker at the top -->
+    <path d="M 268 300
+             L 300 268
+             L 540 790
+             L 484 820
+             Z"
+          fill="url(#vgrad)"/>
+    <!-- Right stroke, mirrored -->
+    <path d="M 756 300
+             L 724 268
+             L 484 820
+             L 540 790
+             Z"
+          fill="url(#vgrad)"/>
+    <!-- Bottom fillet join so the two strokes meet cleanly -->
+    <path d="M 484 820 Q 512 852 540 790 L 484 790 Z" fill="url(#vgrad)"/>
+  </g>
+
+  <!-- Tiny diagonal spark/accent in the upper-right, echoing the Vinted brand -->
+  <g opacity="0.9">
+    <circle cx="760" cy="276" r="28" fill="#ffffff" opacity="0.85"/>
+    <circle cx="760" cy="276" r="14" fill="#3b82f6"/>
+  </g>
+</svg>

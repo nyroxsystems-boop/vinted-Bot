@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3840 2160" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;max-width:100%">
+  <!-- ──────────────────────────────────────────────────────────────────
+       Blackruby — 4K Desktop Wallpaper (3840×2160)
+       Cinematic dark obsidian background, floating faceted gem off-center.
+       Designed to look great as a desktop background — text-free, depth.
+       ────────────────────────────────────────────────────────────────── -->
+
+  <defs>
+    <!-- Deep cinematic background — bias warmth in upper-left, cool in lower-right -->
+    <radialGradient id="bg" cx="35%" cy="40%" r="85%">
+      <stop offset="0%"   stop-color="#1a0a1c" stop-opacity="1"/>
+      <stop offset="35%"  stop-color="#0c0610" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="1"/>
+    </radialGradient>
+
+    <!-- Diffuse gem glow halo -->
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#f43f5e" stop-opacity="0.42"/>
+      <stop offset="35%"  stop-color="#a855f7" stop-opacity="0.28"/>
+      <stop offset="65%"  stop-color="#6366f1" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Outer corona behind the gem -->
+    <radialGradient id="corona" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ec4899" stop-opacity="0.20"/>
+      <stop offset="50%"  stop-color="#8b5cf6" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Facet fills (same palette as app icon for brand consistency) -->
+    <linearGradient id="wFacetTop" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"   stop-color="#ffb4c1"/>
+      <stop offset="35%"  stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#be123c"/>
+    </linearGradient>
+    <linearGradient id="wFacetLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#d8b4fe"/>
+      <stop offset="50%"  stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#581c87"/>
+    </linearGradient>
+    <linearGradient id="wFacetRight" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#a5b4fc"/>
+      <stop offset="50%"  stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="wFacetCenter" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"   stop-color="#fbcfe8"/>
+      <stop offset="40%"  stop-color="#e879f9"/>
+      <stop offset="100%" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="wFacetBottom" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"   stop-color="#9f1239"/>
+      <stop offset="50%"  stop-color="#5b21b6"/>
+      <stop offset="100%" stop-color="#0f0a2a"/>
+    </linearGradient>
+
+    <radialGradient id="wSparkle" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="50%"  stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="wSheen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Strong shadow under the floating gem -->
+    <filter id="wGemShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="35"/>
+      <feOffset dx="0" dy="40"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Pattern: subtle dot-grid for the background -->
+    <pattern id="dotGrid" x="0" y="0" width="80" height="80" patternUnits="userSpaceOnUse">
+      <circle cx="40" cy="40" r="1.2" fill="#ffffff" fill-opacity="0.05"/>
+    </pattern>
+
+    <!-- Vignette mask -->
+    <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
+      <stop offset="60%"  stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.55"/>
+    </radialGradient>
+
+  </defs>
+
+  <!-- ── Cinematic backdrop ──────────────────────────────────────────── -->
+  <rect width="3840" height="2160" fill="url(#bg)"/>
+
+  <!-- Soft dot-grid texture (very subtle) -->
+  <rect width="3840" height="2160" fill="url(#dotGrid)"/>
+
+  <!-- Field of tiny stars — small pinpoints, no halo -->
+  <g fill="#ffffff" fill-opacity="0.5">
+    <circle cx="220"  cy="180"  r="2.5"/>
+    <circle cx="540"  cy="320"  r="3"/>
+    <circle cx="900"  cy="160"  r="2"/>
+    <circle cx="1240" cy="280"  r="2.5"/>
+    <circle cx="2300" cy="220"  r="3"/>
+    <circle cx="3000" cy="380"  r="2"/>
+    <circle cx="3500" cy="540"  r="2.5"/>
+    <circle cx="320"  cy="1620" r="3"/>
+    <circle cx="780"  cy="1880" r="2"/>
+    <circle cx="1180" cy="1920" r="2.5"/>
+    <circle cx="2700" cy="1750" r="2"/>
+    <circle cx="3300" cy="1980" r="3"/>
+    <circle cx="3680" cy="1300" r="2.5"/>
+    <circle cx="160"  cy="1050" r="2"/>
+  </g>
+
+  <!-- Large outer corona behind the gem (off-center to the right) -->
+  <ellipse cx="2400" cy="1080" rx="1600" ry="1280" fill="url(#corona)"/>
+
+  <!-- Medium halo -->
+  <ellipse cx="2400" cy="1080" rx="1050" ry="900" fill="url(#halo)"/>
+
+  <!-- ── The floating gem (gem center: 2400, 1080; height ~ 1240) ────── -->
+  <!--
+       Vertices (relative to center 2400, 1080):
+         Top   T   (2400, 460)
+         TL    (2050, 760)        TR  (2750, 760)
+         CL    (2150, 1180)       CR  (2650, 1180)
+         BL    (2050, 760)→facet  BR  (2750, 760)→facet
+         Bot   B   (2400, 1700)
+  -->
+  <g filter="url(#wGemShadow)">
+    <!-- Background plate -->
+    <path d="M 2050 760 L 2400 460 L 2750 760 L 2650 1180 L 2400 1700 L 2150 1180 Z"
+          fill="#1a0a16" stroke="#4a1832" stroke-width="3"/>
+
+    <!-- Left side (violet) -->
+    <path d="M 2050 760 L 2150 1180 L 2400 1700 L 2050 760 Z" fill="url(#wFacetLeft)"/>
+    <!-- Right side (indigo) -->
+    <path d="M 2750 760 L 2650 1180 L 2400 1700 L 2750 760 Z" fill="url(#wFacetRight)"/>
+
+    <!-- Top-left upper facet (ruby) -->
+    <path d="M 2050 760 L 2400 460 L 2310 1010 L 2150 1180 Z" fill="url(#wFacetTop)"/>
+    <!-- Top-right upper facet -->
+    <path d="M 2400 460 L 2750 760 L 2650 1180 L 2490 1010 Z" fill="url(#wFacetRight)" opacity="0.95"/>
+
+    <!-- Center bright top diamond -->
+    <path d="M 2400 460 L 2490 1010 L 2400 1100 L 2310 1010 Z" fill="url(#wFacetCenter)"/>
+
+    <!-- Lower facets -->
+    <path d="M 2150 1180 L 2310 1010 L 2400 1100 L 2400 1700 Z" fill="url(#wFacetBottom)"/>
+    <path d="M 2650 1180 L 2490 1010 L 2400 1100 L 2400 1700 Z" fill="url(#wFacetBottom)" opacity="0.93"/>
+
+    <!-- Top sheen line -->
+    <path d="M 2050 760 L 2400 460 L 2750 760 L 2650 770 L 2400 488 L 2150 770 Z"
+          fill="url(#wSheen)" opacity="0.85"/>
+
+    <!-- Big sparkle near top-left -->
+    <ellipse cx="2230" cy="720" rx="80" ry="36" fill="url(#wSparkle)"
+             transform="rotate(-22, 2230, 720)" opacity="0.85"/>
+    <circle cx="2280" cy="700" r="10" fill="#ffffff" opacity="0.95"/>
+    <circle cx="2280" cy="700" r="22" fill="#ffffff" opacity="0.25"/>
+
+    <!-- Central reflective line -->
+    <path d="M 2400 460 L 2400 1100 L 2400 1700"
+          stroke="#ffffff" stroke-opacity="0.18" stroke-width="2" fill="none"/>
+
+    <!-- Hairline edges -->
+    <path d="M 2050 760 L 2150 1180 L 2400 1700 L 2650 1180 L 2750 760 L 2400 460 Z"
+          fill="none" stroke="#000000" stroke-opacity="0.45" stroke-width="3"/>
+    <path d="M 2050 760 L 2310 1010 M 2750 760 L 2490 1010 M 2150 1180 L 2400 1100 L 2650 1180"
+          stroke="#000000" stroke-opacity="0.32" stroke-width="2" fill="none"/>
+  </g>
+
+  <!-- Distant smaller gem silhouettes on the left for depth -->
+  <g opacity="0.18" transform="translate(750, 1400) scale(0.32)">
+    <path d="M 2050 760 L 2400 460 L 2750 760 L 2400 1700 L 2050 760 Z" fill="url(#wFacetLeft)"/>
+  </g>
+  <g opacity="0.12" transform="translate(150, 700) scale(0.20)">
+    <path d="M 2050 760 L 2400 460 L 2750 760 L 2400 1700 L 2050 760 Z" fill="url(#wFacetRight)"/>
+  </g>
+
+  <!-- Vignette over everything -->
+  <rect width="3840" height="2160" fill="url(#vignette)" pointer-events="none"/>
+</svg>

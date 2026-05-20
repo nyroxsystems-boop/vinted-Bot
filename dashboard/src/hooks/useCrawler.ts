@@ -84,3 +84,7 @@ export async function runCrawl(body: {
     }>;
   }>('/crawler/run', body);
 }
+
+export async function stopCrawl() {
+  return api.post<{ ok: boolean; cancelled: boolean }>('/crawler/stop', {});
+}

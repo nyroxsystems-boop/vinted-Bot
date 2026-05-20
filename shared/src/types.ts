@@ -2,7 +2,25 @@
 // Shared TypeScript types — used by all workspace packages.
 // ──────────────────────────────────────────────────────────────────────────────
 
-export type BotName = 'vinted' | 'temu';
+export type BotName = 'vinted' | 'temu' | 'cj';
+
+export interface VintedAccount {
+  id: number;
+  label: string;
+  username: string | null;
+  state_path: string;
+  data_dir: string;
+  active: number;       // 0 | 1 — SQLite boolean
+  logged_in: number;    // 0 | 1
+  last_login_at: string | null;
+  created_at: string;
+  /** Platform identity this account belongs to. ALTER-added column
+   *  (default 'vinted') — see `shared/src/db.ts` ensureColumn migration.
+   *  Must match a `PlatformId` from `shared/src/accounts.ts`. */
+  marketplace?: string;
+  /** Residential proxy URL for this account. NULL → direct connection. */
+  proxy_url?: string | null;
+}
 
 export interface Listing {
   id: number;
@@ -50,7 +68,7 @@ export interface ChatMessage {
   created_at: string;
 }
 
-export type OfferState = 'pending' | 'accepted' | 'declined' | 'expired';
+export type OfferState = 'pending' | 'accepted' | 'declined' | 'countered' | 'expired';
 export type OfferDecider = 'auto' | 'manual' | null;
 
 export interface Offer {
@@ -81,6 +99,11 @@ export interface Sale {
   buyer_name: string;
   buyer_address: BuyerAddress | null; // JSON
   shipping_label_url: string | null;
+  shipping_label_path: string | null;
+  shipping_label_fetched_at: string | null;
+  tracking_number: string | null;
+  tracking_sent_at: string | null;
+  feedback_left_at: string | null;
   paid_at: string | null;
   shipped_at: string | null;
   created_at: string;
@@ -122,6 +145,45 @@ export interface TemuBatch {
   sale_count: number;
   total_eur: number | null;
   last_error: string | null;
+  created_at: string;
+}
+
+// ── CJ Dropshipping Types ────────────────────────────────────────────────────
+
+export type CJOrderState =
+  | 'pending'      // sale detected, CJ order not yet placed
+  | 'ordered'      // order placed via CJ API
+  | 'shipping'     // CJ shipped, tracking number available
+  | 'delivered'    // tracking shows delivered
+  | 'failed'       // order failed
+  | 'cancelled';
+
+export interface CJOrder {
+  id: number;
+  sale_id: number;
+  cj_order_id: string | null;
+  cj_order_number: string | null;
+  status: CJOrderState;
+  tracking_number: string | null;
+  logistic_name: string | null;
+  cost_total_eur: number | null;
+  ordered_at: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CJProductMapping {
+  id: number;
+  folder_num: number;
+  cj_product_id: string;
+  cj_variant_id: string;
+  cj_product_url: string | null;
+  cost_eur: number | null;
+  shipping_eur: number | null;
+  warehouse: string; // 'CN' | 'DE' | 'US'
   created_at: string;
 }
 

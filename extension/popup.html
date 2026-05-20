@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Blackruby Crosslister</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #e5e5e5;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #ff4444, #ff8800);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .header .version {
+      font-size: 11px;
+      color: #666;
+      margin-left: auto;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+    .status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      flex-shrink: 0;
+    }
+    .status .dot.disconnected { background: #ef4444; }
+    .platforms {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .platform {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      background: #1a1a1a;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #999;
+    }
+    .platform .icon { font-size: 14px; }
+    .platform.active { color: #e5e5e5; background: #222; }
+    .footer {
+      text-align: center;
+      font-size: 11px;
+      color: #444;
+      padding-top: 8px;
+      border-top: 1px solid #1a1a1a;
+    }
+    a { color: #ff6644; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>⚡ Blackruby</h1>
+    <span class="version">v1.0.0</span>
+  </div>
+
+  <div class="status" id="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Checking connection...</span>
+  </div>
+
+  <div class="platforms" id="platforms">
+    <div class="platform"><span class="icon">🟢</span> Vinted</div>
+    <div class="platform"><span class="icon">🟢</span> eBay DE</div>
+    <div class="platform"><span class="icon">🟢</span> eBay UK</div>
+    <div class="platform"><span class="icon">🟢</span> Kleinanzeigen</div>
+    <div class="platform"><span class="icon">🟢</span> Depop</div>
+    <div class="platform"><span class="icon">🟢</span> Etsy</div>
+    <div class="platform"><span class="icon">🟢</span> Grailed</div>
+    <div class="platform"><span class="icon">🟢</span> Wallapop</div>
+    <div class="platform"><span class="icon">🟢</span> Mercari</div>
+    <div class="platform"><span class="icon">🟢</span> FB Market</div>
+    <div class="platform"><span class="icon">🟢</span> Poshmark</div>
+  </div>
+
+  <div class="footer">
+    Open <a href="http://localhost:5173" target="_blank">Dashboard</a> to crosslist
+  </div>
+
+  <script>
+    // Check if dashboard is connected
+    chrome.tabs.query({ url: ['*://localhost/*'] }, (tabs) => {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (tabs.length > 0) {
+        dot.className = 'dot';
+        text.textContent = 'Dashboard connected';
+      } else {
+        dot.className = 'dot disconnected';
+        text.textContent = 'Dashboard not open';
+      }
+    });
+  </script>
+</body>
+</html>

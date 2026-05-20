@@ -1,0 +1,9 @@
+[
+  {
+    "accept": "image/jpeg,image/gif,image/png,image/webp",
+    "multiple": true,
+    "name": "photos",
+    "id": "",
+    "outerHTML": "<input data-testid=\"add-photos-input\" class=\"u-hidden\" accept=\"image/jpeg,image/gif,image/png,image/webp\" multiple=\"\" type=\"file\" name=\"photos\" style=\"\">"
+  }
+]

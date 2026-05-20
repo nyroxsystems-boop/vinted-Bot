@@ -10,7 +10,8 @@
     "./db": "./src/db.ts",
     "./types": "./src/types.ts",
     "./logger": "./src/logger.ts",
-    "./events": "./src/events.ts"
+    "./events": "./src/events.ts",
+    "./auth-token": "./src/auth-token.ts"
   },
   "scripts": {
     "migrate": "tsx src/migrate.ts",

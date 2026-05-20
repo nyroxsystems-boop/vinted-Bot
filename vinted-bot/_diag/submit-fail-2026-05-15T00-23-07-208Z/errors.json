@@ -1,0 +1,7 @@
+[
+  {
+    "sel": "[role=\"alert\"]",
+    "text": "Überschrift enthält zu viele Sonderzeichen hintereinander",
+    "html": "<div class=\"web_ui__Validation__validation web_ui__Validation__warning\" role=\"alert\">Überschrift enthält zu viele Sonderzeichen hintereinander</div>"
+  }
+]

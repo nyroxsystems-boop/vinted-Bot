@@ -1,0 +1,12 @@
+[
+  {
+    "sel": "[role=\"alert\"]",
+    "text": "Wähle ein Marke, um fortzufahren",
+    "html": "<div class=\"web_ui__Validation__validation web_ui__Validation__warning\" role=\"alert\">Wähle ein Marke, um fortzufahren</div>"
+  },
+  {
+    "sel": "[role=\"alert\"]",
+    "text": "Wähle ein Farbe, um fortzufahren",
+    "html": "<div class=\"web_ui__Validation__validation web_ui__Validation__warning\" role=\"alert\">Wähle ein Farbe, um fortzufahren</div>"
+  }
+]

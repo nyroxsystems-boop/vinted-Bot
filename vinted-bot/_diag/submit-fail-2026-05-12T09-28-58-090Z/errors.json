@@ -1,0 +1,7 @@
+[
+  {
+    "sel": "[role=\"alert\"]",
+    "text": "Wähle eine Unterkategorie",
+    "html": "<div class=\"web_ui__Validation__validation web_ui__Validation__warning\" role=\"alert\">Wähle eine Unterkategorie</div>"
+  }
+]

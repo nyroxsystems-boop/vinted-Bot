@@ -12,7 +12,11 @@ const BASE_URL = process.env.VINTED_BASE_URL ?? 'https://www.vinted.de';
  * Click the "Accept offer" button inside the Vinted chat. Creates a sale row
  * on success so the orchestrator can hand off to the Temu bot.
  */
-export async function acceptOffer(offer: Offer, decidedBy: 'auto' | 'manual'): Promise<{
+export async function acceptOffer(
+  offer: Offer,
+  decidedBy: 'auto' | 'manual',
+  accountId: number,
+): Promise<{
   ok: boolean;
   saleId?: number;
   error?: string;
@@ -27,10 +31,10 @@ export async function acceptOffer(offer: Offer, decidedBy: 'auto' | 'manual'): P
     return { ok: false, error: 'Cannot accept offer without linked listing' };
   }
 
-  const mb = await getVintedBrowser();
+  const mb = await getVintedBrowser(accountId);
   const page = await mb.context.newPage();
   try {
-    await requireLogin(page);
+    await requireLogin(page, accountId);
     await page.goto(`${BASE_URL}/inbox/${chat.vinted_conversation_id}`, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,

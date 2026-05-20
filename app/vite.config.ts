@@ -12,7 +12,7 @@ export default defineConfig({
   },
   build: {
     target: 'es2021',
-    sourcemap: true,
+    sourcemap: process.env.NODE_ENV !== 'production',
     minify: false,
     outDir: 'dist',
   },

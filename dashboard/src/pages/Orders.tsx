@@ -17,12 +17,12 @@ function computeAction(o: OrderRow): Action {
 const ACTION_LABEL: Record<Action, { text: string; cls: string; hint: string }> = {
   none: {
     text: '✓ fertig',
-    cls: 'bg-slate-100 text-slate-500',
+    cls: 'bg-zinc-800 text-zinc-400',
     hint: 'Paket bereits an Käufer geschickt.',
   },
   'wait-temu': {
     text: 'Warten',
-    cls: 'bg-slate-100 text-slate-700',
+    cls: 'bg-zinc-800 text-zinc-300',
     hint: 'Paket von Temu ist unterwegs. Nichts zu tun.',
   },
   'temu-arrived': {
@@ -37,11 +37,11 @@ const ACTION_LABEL: Record<Action, { text: string; cls: string; hint: string }> 
   },
   'manual-check': {
     text: '? Status prüfen',
-    cls: 'bg-slate-200 text-slate-700',
+    cls: 'bg-zinc-800 text-zinc-300',
     hint: 'Unklar — im Temu-Konto manuell nachschauen.',
   },
   'fix-temu': {
-    text: '⚠ Temu-Fehler',
+    text: 'Temu-Fehler',
     cls: 'bg-red-100 text-red-700',
     hint: 'Temu-Bestellung ist fehlgeschlagen. Manuell bestellen oder Listing prüfen.',
   },
@@ -111,25 +111,25 @@ function Section(props: {
   if (props.collapsible && props.rows.length === 0) return null;
 
   return (
-    <div className={`card ${props.emphasis && props.rows.length > 0 ? 'border-amber-300 bg-amber-50/50' : ''}`}>
+    <div className={`card ${props.emphasis && props.rows.length > 0 ? 'border-amber-300 bg-amber-500/10/50' : ''}`}>
       <div className="mb-3">
         <h2 className="text-lg font-semibold">
           {props.title}{' '}
-          <span className="ml-1 rounded-full bg-slate-200 px-2 text-xs text-slate-700">{props.rows.length}</span>
+          <span className="ml-1 rounded-full bg-zinc-800 px-2 text-xs text-zinc-300">{props.rows.length}</span>
         </h2>
-        <div className="text-xs text-slate-500">{props.subtitle}</div>
+        <div className="text-xs text-zinc-400">{props.subtitle}</div>
       </div>
       {props.loading && props.rows.length === 0 && (
-        <div className="py-3 text-center text-sm text-slate-400">Lade…</div>
+        <div className="py-3 text-center text-sm text-zinc-500">Lade…</div>
       )}
       {!props.loading && props.rows.length === 0 && props.emptyText && (
-        <div className="py-3 text-center text-sm text-slate-400">{props.emptyText}</div>
+        <div className="py-3 text-center text-sm text-zinc-500">{props.emptyText}</div>
       )}
       {props.rows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wider text-slate-500">
+              <tr className="border-b text-left text-xs uppercase tracking-wider text-zinc-400">
                 <th className="py-2">Sale</th>
                 <th>Listing</th>
                 <th>Käufer</th>
@@ -149,11 +149,11 @@ function Section(props: {
                     <td className="py-2">#{o.sale_id}</td>
                     <td className="max-w-[200px] truncate">{o.listing_title ?? `#${o.listing_id}`}</td>
                     <td>{o.buyer_name}</td>
-                    <td className="text-xs text-slate-500">{o.paid_at ?? '—'}</td>
+                    <td className="text-xs text-zinc-400">{o.paid_at ?? '—'}</td>
                     <td>
                       <TemuStateBadge state={o.temu_state} />
                       {o.temu_order_id && (
-                        <div className="mt-0.5 font-mono text-[10px] text-slate-500">{o.temu_order_id}</div>
+                        <div className="mt-0.5 font-mono text-[10px] text-zinc-400">{o.temu_order_id}</div>
                       )}
                       {o.temu_last_error && (
                         <div
@@ -170,7 +170,7 @@ function Section(props: {
                       <div className={`inline-block rounded px-2 py-1 text-xs ${a.cls}`} title={a.hint}>
                         {a.text}
                       </div>
-                      <div className="mt-0.5 max-w-[260px] text-[11px] text-slate-500">{a.hint}</div>
+                      <div className="mt-0.5 max-w-[260px] text-[11px] text-zinc-400">{a.hint}</div>
                     </td>
                   </tr>
                 );
@@ -184,17 +184,17 @@ function Section(props: {
 }
 
 function TemuStateBadge({ state }: { state: string | null }) {
-  if (!state) return <span className="text-slate-400">—</span>;
+  if (!state) return <span className="text-zinc-500">—</span>;
   const map: Record<string, string> = {
-    draft: 'bg-slate-100 text-slate-700',
+    draft: 'bg-zinc-800 text-zinc-300',
     placed: 'bg-brand-100 text-brand-700',
     shipped: 'bg-amber-100 text-amber-800',
     delivered: 'bg-green-100 text-green-800',
     failed: 'bg-red-100 text-red-700',
-    cancelled: 'bg-slate-200 text-slate-600',
+    cancelled: 'bg-zinc-800 text-zinc-400',
   };
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[state] ?? 'bg-slate-100'}`}>
+    <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[state] ?? 'bg-zinc-800'}`}>
       {state}
     </span>
   );

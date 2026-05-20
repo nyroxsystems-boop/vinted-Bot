@@ -48,12 +48,21 @@ export const VINTED = {
   ].join(', '),
 
   // Any of these visible = user is logged in.
-  // VERIFIED: logged-in users see the "13 neue Nachrichten" inbox link
-  // in the header (the unread-count wording is stable; the number varies).
+  //
+  // IMPORTANT: do NOT include `a[href="/inbox"]` here — Vinted's header shows
+  // that link to GUESTS as well (it redirects them to login). Using it as a
+  // logged-in check gives false positives and the login flow closes the
+  // browser window before the user can enter credentials.
+  //
+  // The profile-pic button only renders once a real session cookie exists,
+  // so it's a reliable indicator. NOTE: dropped `header button:has(img[alt])`
+  // because Vinted's logo lives inside a header button on the login page
+  // → false-positive "logged in" detection that auto-closed the browser
+  // before the user finished login. Stick to data-testid + member-only links.
   loggedInIndicator: [
-    'a[href="/inbox"]',                           // always present when auth'd
-    'header button:has(img[alt])',                // profile-pic button (alt = username)
     '[data-testid="header-user-profile-button"]',
+    '[data-testid="user-menu"]',
+    'a[href^="/member/general/profile"]',         // profile-tab link, only in logged-in nav
   ].join(', '),
 
   // ── Consent dialog (appears on first visit in a fresh session) ────────────

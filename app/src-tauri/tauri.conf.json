@@ -1,46 +1,75 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Vinted-System",
-  "version": "0.1.0",
-  "identifier": "de.nyroxsystems.vinted-system",
+  "productName": "Blackruby",
+  "version": "0.6.5",
+  "identifier": "app.blackruby.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:1420",
-    "frontendDist": "../dist"
+    "beforeDevCommand": "npm run -w @vinted-system/dashboard dev",
+    "beforeBuildCommand": "npm run -w @vinted-system/dashboard build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../dashboard/dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "Vinted-System · Services",
-        "width": 1100,
-        "height": 720,
-        "minWidth": 900,
-        "minHeight": 600,
+        "title": "Blackruby",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 680,
         "resizable": true,
         "center": true,
         "decorations": true,
         "shadow": true,
-        "visible": true
+        "visible": true,
+        "useHttpsScheme": false
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://localhost:* http://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://localhost:* http://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob: https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-ancestors 'none'",
       "capabilities": ["default"]
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "category": "DeveloperTool",
-    "shortDescription": "Vinted-System lokaler Bot-Stack",
-    "longDescription": "Lokaler Bot + Dashboard für Vinted-Verkäufe mit Batch-Cart-Fulfillment über Temu.",
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Blackruby — autonomes 21-Plattformen Crosslisting-System",
+    "longDescription": "Lokale Crosslisting-Engine für Vinted, Kleinanzeigen, eBay und 18 weitere Marktplätze. Inklusive KI-Listing-Generation, CJ-Fulfillment, Auto-Repricer, Cross-Sync und Chat-Autopilot.",
+    "copyright": "© 2026 Blackruby Systems",
+    "publisher": "Blackruby Systems",
+    "homepage": "https://blackruby.app",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns"
-    ]
-  }
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "exceptionDomain": "localhost",
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-",
+      "dmg": {
+        "background": null,
+        "windowSize": { "width": 660, "height": 400 }
+      }
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "wix": {
+        "language": ["de-DE", "en-US"]
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perMachine",
+        "languages": ["German", "English"]
+      }
+    }
+  },
+  "plugins": {}
 }

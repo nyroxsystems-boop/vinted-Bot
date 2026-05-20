@@ -1,10 +1,15 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Service Supervisor
 //
-// Spawns the four Node services (orchestrator, vinted-bot, temu-bot, dashboard)
+// Spawns ALL Node backend services (orchestrator, 11 marketplace bots, CJ, temu)
 // as child processes, pipes their stdout/stderr into Tauri events
 // ("service-log"), and tracks their lifecycle state via "service-status"
 // events. Kills all children on app shutdown.
+//
+// NOTE: The React dashboard is NOT started here anymore — it is the Tauri
+// frontend itself, started by Tauri's `beforeDevCommand` in dev (or bundled
+// via `frontendDist` in release). Keeping it out of the supervisor avoids
+// double-starting the Vite dev server on port 5173.
 //
 // Late-frontend-join safety:
 //   In Tauri v2 the Rust side can fire `emit` events before the webview has
@@ -17,9 +22,12 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::net::ToSocketAddrs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
@@ -60,51 +68,195 @@ pub struct ServiceDef {
 }
 
 pub fn service_definitions() -> Vec<ServiceDef> {
+    // In debug (= `tauri dev`) builds each Node service runs via its `dev`
+    // script, which uses `tsx watch` and restarts on source-file changes.
+    // In release builds we stick to `start` (plain `tsx`, no watcher) so the
+    // shipped .app doesn't waste cycles scanning the source tree.
+    let script = if cfg!(debug_assertions) { "dev" } else { "start" };
     vec![
         ServiceDef {
             name: "orchestrator",
-            args: vec!["run", "-w", "@vinted-system/orchestrator", "start"],
+            args: vec!["run", "-w", "@vinted-system/orchestrator", script],
             http_url: Some("http://localhost:4700"),
             port: 4700,
             ready_marker: "Orchestrator listening",
         },
         ServiceDef {
             name: "vinted-bot",
-            args: vec!["run", "-w", "@vinted-system/vinted-bot", "start"],
+            args: vec!["run", "-w", "@vinted-system/vinted-bot", script],
             http_url: Some("http://localhost:4701"),
             port: 4701,
             ready_marker: "Vinted-bot API listening",
         },
         ServiceDef {
-            name: "temu-bot",
-            args: vec!["run", "-w", "@vinted-system/temu-bot", "start"],
-            http_url: Some("http://localhost:4702"),
-            port: 4702,
-            ready_marker: "Temu-bot API listening",
+            name: "cj-service",
+            args: vec!["run", "-w", "@vinted-system/cj-service", script],
+            http_url: Some("http://localhost:4720"),
+            port: 4720,
+            ready_marker: "CJ Service running",
         },
         ServiceDef {
-            name: "dashboard",
-            args: vec!["run", "-w", "@vinted-system/dashboard", "dev"],
-            http_url: Some("http://localhost:5173"),
-            port: 5173,
-            ready_marker: "Local:",
+            name: "kleinanzeigen-bot",
+            args: vec!["run", "-w", "@vinted-system/kleinanzeigen-bot", script],
+            http_url: Some("http://localhost:4703"),
+            port: 4703,
+            ready_marker: "Kleinanzeigen-Bot listening",
         },
+        ServiceDef {
+            name: "mercari-bot",
+            args: vec!["run", "-w", "@vinted-system/mercari-bot", script],
+            http_url: Some("http://localhost:4704"),
+            port: 4704,
+            ready_marker: "Mercari-Bot listening",
+        },
+        ServiceDef {
+            name: "depop-bot",
+            args: vec!["run", "-w", "@vinted-system/depop-bot", script],
+            http_url: Some("http://localhost:4705"),
+            port: 4705,
+            ready_marker: "Depop-Bot listening",
+        },
+        ServiceDef {
+            name: "wallapop-bot",
+            args: vec!["run", "-w", "@vinted-system/wallapop-bot", script],
+            http_url: Some("http://localhost:4706"),
+            port: 4706,
+            ready_marker: "Wallapop-Bot listening",
+        },
+        ServiceDef {
+            name: "ebay-bot",
+            args: vec!["run", "-w", "@vinted-system/ebay-bot", script],
+            http_url: Some("http://localhost:4707"),
+            port: 4707,
+            ready_marker: "eBay Bot listening",
+        },
+        // NOTE: ebay-uk runs in the same bot binary via `EBAY_MARKET=uk` env
+        // var (see ecosystem.config.cjs). The Tauri-Supervisor doesn't yet
+        // support per-service env-vars — eBay-UK is therefore a backlog item.
+        // The dashboard's /api/home/status entry for it shows
+        // `loggedIn=false` until that's wired up; no functional impact.
+        ServiceDef {
+            name: "etsy-bot",
+            args: vec!["run", "-w", "@vinted-system/etsy-bot", script],
+            http_url: Some("http://localhost:4709"),
+            port: 4709,
+            ready_marker: "Etsy Bot listening",
+        },
+        ServiceDef {
+            name: "grailed-bot",
+            args: vec!["run", "-w", "@vinted-system/grailed-bot", script],
+            http_url: Some("http://localhost:4710"),
+            port: 4710,
+            ready_marker: "Grailed Bot listening",
+        },
+        ServiceDef {
+            name: "fb-marketplace-bot",
+            args: vec!["run", "-w", "@vinted-system/fb-marketplace-bot", script],
+            http_url: Some("http://localhost:4711"),
+            port: 4711,
+            ready_marker: "FB-Marketplace Bot listening",
+        },
+        ServiceDef {
+            name: "vestiaire-bot",
+            args: vec!["run", "-w", "@vinted-system/vestiaire-bot", script],
+            http_url: Some("http://localhost:4712"),
+            port: 4712,
+            ready_marker: "Vestiaire Bot listening",
+        },
+        ServiceDef {
+            name: "whatnot-bot",
+            args: vec!["run", "-w", "@vinted-system/whatnot-bot", script],
+            http_url: Some("http://localhost:4713"),
+            port: 4713,
+            ready_marker: "Whatnot Bot listening",
+        },
+        ServiceDef {
+            name: "leboncoin-bot",
+            args: vec!["run", "-w", "@vinted-system/leboncoin-bot", script],
+            http_url: Some("http://localhost:4714"),
+            port: 4714,
+            ready_marker: "Leboncoin-bot API listening",
+        },
+        ServiceDef {
+            name: "marktplaats-bot",
+            args: vec!["run", "-w", "@vinted-system/marktplaats-bot", script],
+            http_url: Some("http://localhost:4715"),
+            port: 4715,
+            ready_marker: "Marktplaats-bot API listening",
+        },
+        ServiceDef {
+            name: "willhaben-bot",
+            args: vec!["run", "-w", "@vinted-system/willhaben-bot", script],
+            http_url: Some("http://localhost:4716"),
+            port: 4716,
+            ready_marker: "Willhaben-bot API listening",
+        },
+        ServiceDef {
+            name: "shopify-bot",
+            args: vec!["run", "-w", "@vinted-system/shopify-bot", script],
+            http_url: Some("http://localhost:4717"),
+            port: 4717,
+            ready_marker: "Shopify-bot API listening",
+        },
+        ServiceDef {
+            name: "woocommerce-bot",
+            args: vec!["run", "-w", "@vinted-system/woocommerce-bot", script],
+            http_url: Some("http://localhost:4718"),
+            port: 4718,
+            ready_marker: "Woocommerce-bot API listening",
+        },
+        ServiceDef {
+            name: "poshmark-bot",
+            args: vec!["run", "-w", "@vinted-system/poshmark-bot", script],
+            http_url: Some("http://localhost:4719"),
+            port: 4719,
+            ready_marker: "Poshmark-bot API listening",
+        },
+        // NOTE: dashboard is intentionally NOT here — Tauri starts it itself
+        // via `beforeDevCommand` in tauri.conf.json (also on :5173).
     ]
 }
 
 /// Kill anything holding `port`. Runs `lsof -ti :PORT` + `kill -9`.
 /// Best effort — errors are logged but not fatal.
 fn free_port(port: u16) -> Vec<u32> {
-    let out = match Command::new("/usr/sbin/lsof").arg("-ti").arg(format!(":{}", port)).output() {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
+    #[cfg(unix)]
+    let pids: Vec<u32> = {
+        let out = match Command::new("/usr/sbin/lsof").arg("-ti").arg(format!(":{}", port)).output() {
+            Ok(o) if o.status.success() => o,
+            _ => return Vec::new(),
+        };
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect()
     };
-    let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.trim().parse().ok())
-        .collect();
+    #[cfg(windows)]
+    let pids: Vec<u32> = {
+        // `netstat -ano` lists all sockets with PID. Filter for our port +
+        // LISTENING state. The PID is the last whitespace-separated token.
+        let out = match Command::new("netstat").args(["-ano"]).output() {
+            Ok(o) if o.status.success() => o,
+            _ => return Vec::new(),
+        };
+        let needle_a = format!(":{} ", port);   // port followed by space
+        let needle_b = format!(":{}\r", port);  // …or CRLF (Windows)
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| (l.contains(&needle_a) || l.contains(&needle_b)) && l.contains("LISTENING"))
+            .filter_map(|l| l.split_whitespace().last().and_then(|tok| tok.parse::<u32>().ok()))
+            .collect()
+    };
+
     for pid in &pids {
+        #[cfg(unix)]
         let _ = Command::new("/bin/kill").arg("-9").arg(pid.to_string()).output();
+        #[cfg(windows)]
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     if !pids.is_empty() {
         // Give OS a moment to release the port.
@@ -164,13 +316,75 @@ impl Supervisor {
             *guard = true;
         }
         self.record_log(app, "supervisor", "stdout", &format!(
-            "Supervisor bootstrap — npm: {}  cwd: {}",
+            "Supervisor bootstrap (staged) — npm: {}  cwd: {}",
             self.npm_path.display(),
             self.repo_root.display()
         ));
-        for def in self.defs.clone() {
-            self.start_one(app, &def);
+
+        // ── Staged boot ───────────────────────────────────────────────────
+        // Starting 10+ npm processes at once spikes CPU, races on port
+        // binding, and made earlier versions look "stuck". We boot in three
+        // phases, each in its own thread so setup() returns immediately and
+        // the webview can show the soft "Orchestrator startet…"-banner.
+        //
+        // Phase 1 — Core (immediate):
+        //   orchestrator, cj-service. Without these nothing else is useful.
+        //
+        // Phase 2 — Primary marketplace (after Phase 1 health-OK):
+        //   vinted-bot.
+        //
+        // Phase 3 — Secondary marketplaces (3 s apart, parallel to nothing):
+        //   kleinanzeigen, depop, ebay-de.
+        //
+        // Skipped at boot — high-risk / rarely-used bots stay dormant until
+        // the user explicitly starts them from the dashboard:
+        //   mercari, wallapop, ebay-uk, etsy, grailed, fb-marketplace,
+        //   vestiaire, whatnot.
+        const PHASE_1: &[&str] = &["orchestrator", "cj-service"];
+        const PHASE_2: &[&str] = &["vinted-bot"];
+        const PHASE_3: &[&str] = &["kleinanzeigen-bot", "depop-bot", "ebay-bot"];
+
+        // Phase 1 fires immediately, sequential within phase (small set).
+        for name in PHASE_1 {
+            if let Some(def) = self.defs.iter().find(|d| d.name == *name).cloned() {
+                self.start_one(app, &def);
+            }
         }
+
+        // Phases 2 + 3 run in a background thread so the setup() handler
+        // doesn't block. Webview stays responsive throughout.
+        let this = self.clone();
+        let app2 = app.clone();
+        thread::spawn(move || {
+            // Wait for orchestrator to bind its port before we add load.
+            this.record_log(&app2, "supervisor", "stdout", "Waiting for orchestrator readiness (max 30 s)…");
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if probe_health("http://localhost:4700/health") {
+                    this.record_log(&app2, "supervisor", "stdout", "Orchestrator ready → starting Phase 2 (Vinted)");
+                    break;
+                }
+            }
+
+            for name in PHASE_2 {
+                if let Some(def) = this.defs.iter().find(|d| d.name == *name).cloned() {
+                    this.start_one(&app2, &def);
+                }
+            }
+
+            // Stagger Phase 3 so we don't fork 3 npm processes at the same
+            // instant — saves ~30% peak CPU on cold boot.
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            this.record_log(&app2, "supervisor", "stdout", "Starting Phase 3 (KA + Depop + eBay-DE, 3 s apart)");
+            for name in PHASE_3 {
+                if let Some(def) = this.defs.iter().find(|d| d.name == *name).cloned() {
+                    this.start_one(&app2, &def);
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                }
+            }
+            this.record_log(&app2, "supervisor", "stdout",
+                "Staged boot complete. Optional bots (mercari/wallapop/etsy/grailed/fb/vestiaire/whatnot) NOT auto-started — start them from the dashboard when needed.");
+        });
     }
 
     pub fn start_one(self: &Arc<Self>, app: &AppHandle, def: &ServiceDef) {
@@ -194,6 +408,63 @@ impl Supervisor {
             .stderr(Stdio::piped())
             .env("FORCE_COLOR", "0")
             .env("CI", "1"); // make some tools less chatty / non-interactive
+
+        // CRITICAL: When the .app/.exe is launched via the OS shell (Finder
+        // on Mac, Explorer on Windows), it inherits a minimal PATH that does
+        // NOT include Node.js install dirs. npm spawn appears to succeed but
+        // every grandchild crashes because `node` isn't found. Symptom: app
+        // shows 0 children, no orchestrator, no error visible to the user.
+        //
+        // Fix: explicitly add the common Node install dirs to PATH so
+        // `tsx → node → orchestrator` chain can resolve.
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        #[cfg(unix)]
+        let node_dirs: &[&str] = &[
+            "/opt/homebrew/bin",                        // Apple Silicon Homebrew
+            "/usr/local/bin",                           // Intel Homebrew + nodejs.org installer
+            "/opt/homebrew/opt/node/bin",
+            "/usr/local/opt/node/bin",
+        ];
+        #[cfg(windows)]
+        let node_dirs: &[&str] = &[
+            // Default install location of the nodejs.org MSI installer
+            r"C:\Program Files\nodejs",
+            r"C:\Program Files (x86)\nodejs",
+            // nvm-windows default
+            r"C:\Users\Public\nodejs",
+        ];
+        let augmented_path = node_dirs.iter()
+            .filter(|p| !existing_path.contains(*p))
+            .chain(std::iter::once(&existing_path.as_str()))
+            .copied()
+            .collect::<Vec<_>>()
+            .join(sep);
+        cmd.env("PATH", augmented_path);
+
+        // Windows: hide the console window for each npm child so the user
+        // doesn't see 6 black cmd.exe popups when the app boots. Without
+        // CREATE_NO_WINDOW each spawned process renders its own conhost.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        // Put each spawned npm in its own process group so we can kill the
+        // entire tree (npm → tsx → node) on shutdown via killpg(). Without
+        // this, only npm dies and tsx/node grandchildren become orphans
+        // holding their ports indefinitely.
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -251,11 +522,16 @@ impl Supervisor {
             });
         }
 
-        // Exit watcher.
+        // Exit watcher + auto-restart on crash. Without this, a single
+        // service crash takes that marketplace offline until the user
+        // restarts the whole app. Worse: the user often doesn't notice
+        // (the dashboard still loads from orchestrator). With auto-restart
+        // a crashed bot is back online in ~5 s.
         let this = self.clone();
         let app4 = app.clone();
         let key = def.name.to_string();
         let http_url_owned = http_url;
+        let def_clone = def.clone();
         thread::spawn(move || {
             let mut child = match this.children.lock().unwrap().remove(&key) {
                 Some(c) => c,
@@ -263,18 +539,72 @@ impl Supervisor {
             };
             let exit = child.wait();
             let code = exit.ok().and_then(|s| s.code());
-            let state = match code {
-                Some(0) => "exited",
-                _ => "failed",
-            };
-            this.update_status(&app4, &key, state, Some(pid), code, http_url_owned);
+
+            // Code 0 = clean exit (e.g. user clicked Stop) → don't restart.
+            // Non-zero / signal kill / OOM → restart with exponential backoff.
+            // The user can still hit "Stop" in the dashboard to genuinely
+            // halt a service (stop_one() removes it from children before
+            // SIGKILL, so this watcher exits early via the None branch).
+            match code {
+                Some(0) => {
+                    this.update_status(&app4, &key, "exited", Some(pid), code, http_url_owned);
+                }
+                _ => {
+                    this.update_status(&app4, &key, "failed", Some(pid), code, http_url_owned);
+                    this.record_log(&app4, &key, "stderr",
+                        &format!("Service exited with code {:?} — restarting in 5s", code));
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    // Only restart if the user hasn't manually stopped us in
+                    // the meantime (stop_all clears `started`, which we'd
+                    // honour by skipping the respawn).
+                    if *this.started.lock().unwrap() {
+                        this.start_one(&app4, &def_clone);
+                    }
+                }
+            }
         });
     }
 
     pub fn stop_one(self: &Arc<Self>, name: &str) {
+        // Resolve port BEFORE removing from children map so we have it.
+        let port = self.def_for(name).map(|d| d.port);
         if let Some(mut child) = self.children.lock().unwrap().remove(name) {
+            let pid = child.id();
+
+            // Step 1: Kill the entire process tree. npm typically spawns
+            // tsx, tsx spawns node, node spawns playwright/chromium. We
+            // need ALL of them dead, not just npm.
+            #[cfg(unix)]
+            unsafe {
+                // pre_exec(setpgid) put the child in its own process group
+                // — killpg targets that group + every descendant.
+                let pgid = pid as i32;
+                if pgid > 0 {
+                    libc::killpg(pgid, libc::SIGTERM);
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    libc::killpg(pgid, libc::SIGKILL);
+                }
+            }
+            #[cfg(windows)]
+            {
+                // Windows has no process groups in the Unix sense. The
+                // canonical "kill the whole tree" idiom is `taskkill /T /F`.
+                //   /T  → kill child processes as well
+                //   /F  → force-terminate (equivalent to SIGKILL)
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
             let _ = child.kill();
             let _ = child.wait();
+        }
+        // Step 2: Belt-and-braces — kill anyone still holding the port.
+        // `tsx watch` is notorious for double-forking; the tree-kill doesn't
+        // always catch every descendant. free_port() catches the survivors.
+        if let Some(p) = port {
+            let _ = free_port(p);
         }
     }
 
@@ -373,6 +703,33 @@ impl Supervisor {
 /// GUI-launched macOS apps don't inherit the login-shell PATH, so relying on
 /// `Command::new("npm")` alone can fail once we bundle to a .app. Try common
 /// locations and fall back to the bare name.
+/// Lightweight blocking health-probe used by the staged-boot waiter. Pure
+/// blocking std::net so we don't pull in tokio for one TCP-connect check —
+/// the boot thread is already on its own OS thread, blocking is fine.
+fn probe_health(url: &str) -> bool {
+    // Extract host:port from "http://localhost:PORT/path"
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
+    let addr = if host_port.contains(':') {
+        host_port.to_string()
+    } else {
+        format!("{}:80", host_port)
+    };
+    match std::net::TcpStream::connect_timeout(
+        &match addr.to_socket_addrs() {
+            Ok(mut iter) => match iter.next() {
+                Some(a) => a,
+                None => return false,
+            },
+            Err(_) => return false,
+        },
+        std::time::Duration::from_secs(2),
+    ) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
 fn resolve_npm_path() -> PathBuf {
     if let Ok(v) = std::env::var("VINTED_SYSTEM_NPM") {
         let p = PathBuf::from(v);
@@ -380,11 +737,20 @@ fn resolve_npm_path() -> PathBuf {
             return p;
         }
     }
-    let candidates = [
+    #[cfg(unix)]
+    let candidates: &[&str] = &[
         "/opt/homebrew/bin/npm",
         "/usr/local/bin/npm",
         "/usr/bin/npm",
         "/opt/homebrew/opt/node/bin/npm",
+    ];
+    #[cfg(windows)]
+    let candidates: &[&str] = &[
+        // nodejs.org MSI installer
+        r"C:\Program Files\nodejs\npm.cmd",
+        r"C:\Program Files (x86)\nodejs\npm.cmd",
+        // nvm-windows
+        r"C:\Users\Public\nodejs\npm.cmd",
     ];
     for c in candidates {
         let p = PathBuf::from(c);
@@ -392,7 +758,8 @@ fn resolve_npm_path() -> PathBuf {
             return p;
         }
     }
-    // Try which.
+    // Try `which` / `where` to fall back to whatever shell-PATH resolves.
+    #[cfg(unix)]
     if let Ok(out) = Command::new("/bin/sh").arg("-lc").arg("which npm").output() {
         if out.status.success() {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -401,21 +768,83 @@ fn resolve_npm_path() -> PathBuf {
             }
         }
     }
-    PathBuf::from("npm")
+    #[cfg(windows)]
+    if let Ok(out) = Command::new("where").arg("npm.cmd").output() {
+        if out.status.success() {
+            // `where` can return multiple paths line-by-line — take the first.
+            if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                let path = first.trim().to_string();
+                if !path.is_empty() {
+                    return PathBuf::from(path);
+                }
+            }
+        }
+    }
+    PathBuf::from(if cfg!(windows) { "npm.cmd" } else { "npm" })
 }
 
-/// Attempt to locate the Vinted-System repo root.
+/// Persistent config file — lets an installed .app remember where the repo
+/// lives after the user locates it once (via the picker dialog).
+fn config_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    Some(home.join(".vinted-system").join("config.json"))
+}
+
+fn read_saved_root() -> Option<PathBuf> {
+    let cfg = config_path()?;
+    let raw = std::fs::read_to_string(&cfg).ok()?;
+    // Tiny hand-rolled parser — avoids pulling serde_json just for one field.
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("\"repo_root\":") {
+            let value = rest.trim().trim_end_matches(',').trim();
+            if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                let p = PathBuf::from(&value[1..value.len() - 1]);
+                if is_repo_root(&p) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn save_saved_root(root: &Path) -> std::io::Result<()> {
+    if let Some(cfg) = config_path() {
+        if let Some(parent) = cfg.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let body = format!(
+            "{{\n  \"repo_root\": \"{}\"\n}}\n",
+            root.display().to_string().replace('"', "\\\"")
+        );
+        std::fs::write(cfg, body)?;
+    }
+    Ok(())
+}
+
+/// Attempt to locate the Vinted-System repo root. Order:
+///   1. env var VINTED_SYSTEM_ROOT
+///   2. saved config ~/.vinted-system/config.json (populated after first pick)
+///   3. walk parents of current_exe — works when running from
+///      target/release/bundle/macos/, not from /Applications
+///   4. CARGO_MANIFEST_DIR (dev build only)
+///   5. well-known default install location
 pub fn find_repo_root() -> Option<PathBuf> {
     if let Ok(env) = std::env::var("VINTED_SYSTEM_ROOT") {
         let p = PathBuf::from(env);
-        if p.exists() {
+        if is_repo_root(&p) {
             return Some(p);
         }
     }
+    if let Some(saved) = read_saved_root() {
+        return Some(saved);
+    }
     if let Ok(exe) = std::env::current_exe() {
         let mut cur = exe.parent()?.to_path_buf();
-        for _ in 0..8 {
+        for _ in 0..12 {
             if is_repo_root(&cur) {
+                let _ = save_saved_root(&cur);
                 return Some(cur);
             }
             cur = match cur.parent() {
@@ -427,7 +856,25 @@ pub fn find_repo_root() -> Option<PathBuf> {
     if let Some(manifest) = option_env!("CARGO_MANIFEST_DIR") {
         let dev = Path::new(manifest).join("..").join("..");
         if is_repo_root(&dev) {
-            return Some(dev.canonicalize().ok()?);
+            let canon = dev.canonicalize().ok()?;
+            let _ = save_saved_root(&canon);
+            return Some(canon);
+        }
+    }
+    // Well-known default install location — the user's home is always known
+    // when the app is GUI-launched, so this is a reliable last resort.
+    if let Some(home) = std::env::var_os("HOME") {
+        // Try known install locations
+        for subpath in [
+            "Desktop/Vinted/system",
+            "Vinted/system",
+            "Desktop/Blackruby/system",
+        ] {
+            let guess = PathBuf::from(&home).join(subpath);
+            if is_repo_root(&guess) {
+                let _ = save_saved_root(&guess);
+                return Some(guess);
+            }
         }
     }
     None

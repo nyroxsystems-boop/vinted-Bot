@@ -1,0 +1,159 @@
+{
+  "manifest_version": 3,
+  "name": "Blackruby Crosslister",
+  "version": "1.0.0",
+  "description": "Multi-marketplace crosslisting from your Vinted Command Center. Push listings to 10+ platforms with one click.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://www.vinted.de/*",
+    "*://www.vinted.fr/*",
+    "*://www.vinted.com/*",
+    "*://www.ebay.de/*",
+    "*://www.ebay.co.uk/*",
+    "*://www.ebay.com/*",
+    "*://www.kleinanzeigen.de/*",
+    "*://www.depop.com/*",
+    "*://www.etsy.com/*",
+    "*://www.grailed.com/*",
+    "*://www.wallapop.com/*",
+    "*://www.mercari.com/*",
+    "*://jp.mercari.com/*",
+    "*://www.facebook.com/marketplace/*",
+    "*://poshmark.com/*",
+    "*://www.poshmark.com/*",
+    "*://www.vestiairecollective.com/*",
+    "*://www.whatnot.com/*",
+    "*://www.leboncoin.fr/*",
+    "*://www.marktplaats.nl/*",
+    "*://www.willhaben.at/*",
+    "*://www.subito.it/*",
+    "*://www.ricardo.ch/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://localhost/*",
+        "http://localhost:5173/*",
+        "http://localhost:4700/*",
+        "http://127.0.0.1:5173/*",
+        "http://127.0.0.1:4700/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://www.vinted.de/*", "*://www.vinted.fr/*", "*://www.vinted.com/*"],
+      "js": ["platforms/vinted.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.ebay.de/*", "*://www.ebay.co.uk/*", "*://www.ebay.com/*"],
+      "js": ["platforms/ebay.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.kleinanzeigen.de/*"],
+      "js": ["platforms/kleinanzeigen.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.depop.com/*"],
+      "js": ["platforms/depop.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.etsy.com/*"],
+      "js": ["platforms/etsy.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.grailed.com/*"],
+      "js": ["platforms/grailed.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.wallapop.com/*"],
+      "js": ["platforms/wallapop.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.mercari.com/*", "*://jp.mercari.com/*"],
+      "js": ["platforms/mercari.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.facebook.com/marketplace/*"],
+      "js": ["platforms/facebook.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://poshmark.com/*", "*://www.poshmark.com/*"],
+      "js": ["platforms/poshmark.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.vestiairecollective.com/*"],
+      "js": ["platforms/vestiaire.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.whatnot.com/*"],
+      "js": ["platforms/whatnot.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.leboncoin.fr/*"],
+      "js": ["platforms/leboncoin.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.marktplaats.nl/*"],
+      "js": ["platforms/marktplaats.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.willhaben.at/*"],
+      "js": ["platforms/willhaben.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.subito.it/*"],
+      "js": ["platforms/subito.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.ricardo.ch/*"],
+      "js": ["platforms/ricardo.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "externally_connectable": {
+    "matches": [
+      "*://localhost/*",
+      "http://localhost:5173/*",
+      "http://localhost:4700/*"
+    ]
+  }
+}

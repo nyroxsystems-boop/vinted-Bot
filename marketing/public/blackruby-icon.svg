@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- ──────────────────────────────────────────────────────────────────
+       Blackruby — App-Icon
+       Premium dark base + facetted ruby/violet/indigo gemstone.
+       Optimized to render crisp at every size (16×16 to 1024×1024).
+       ────────────────────────────────────────────────────────────────── -->
+
+  <defs>
+    <!-- Dark obsidian base with subtle vignette -->
+    <radialGradient id="baseGlow" cx="50%" cy="0%" r="80%">
+      <stop offset="0%"  stop-color="#1a0a18" stop-opacity="0.9"/>
+      <stop offset="55%" stop-color="#0a0a0c" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="1"/>
+    </radialGradient>
+
+    <!-- Subtle inner-bevel highlight on the base -->
+    <linearGradient id="bevel" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="30%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="70%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.25"/>
+    </linearGradient>
+
+    <!-- Outer brand glow behind the gem -->
+    <radialGradient id="brandGlow" cx="50%" cy="50%" r="55%">
+      <stop offset="0%"   stop-color="#f43f5e" stop-opacity="0.45"/>
+      <stop offset="40%"  stop-color="#a855f7" stop-opacity="0.30"/>
+      <stop offset="70%"  stop-color="#6366f1" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Top-front facet — the brightest face -->
+    <linearGradient id="facetTop" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"   stop-color="#ffb4c1"/>
+      <stop offset="35%"  stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#be123c"/>
+    </linearGradient>
+
+    <!-- Left facet — violet warmth -->
+    <linearGradient id="facetLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#c084fc"/>
+      <stop offset="50%"  stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#6b21a8"/>
+    </linearGradient>
+
+    <!-- Right facet — indigo cool -->
+    <linearGradient id="facetRight" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#818cf8"/>
+      <stop offset="50%"  stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+
+    <!-- Bottom point — deep, almost black -->
+    <linearGradient id="facetBottom" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"   stop-color="#9f1239"/>
+      <stop offset="50%"  stop-color="#5b21b6"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+
+    <!-- Center top facet — bright ruby-violet -->
+    <linearGradient id="facetCenter" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%"   stop-color="#fda4af"/>
+      <stop offset="40%"  stop-color="#e879f9"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+
+    <!-- Specular sparkle highlight -->
+    <radialGradient id="sparkle" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="40%"  stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Crisp top-edge sheen -->
+    <linearGradient id="topSheen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="50%"  stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Outer drop shadow for the gem -->
+    <filter id="gemShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="14"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Subtle noise texture for the base -->
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="3"/>
+      <feColorMatrix values="0 0 0 0 1   0 0 0 0 1   0 0 0 0 1   0 0 0 0.025 0"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
+
+  <!-- ── Rounded-square base ─────────────────────────────────────────── -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#baseGlow)"/>
+
+  <!-- Soft brand-glow halo behind the gem -->
+  <ellipse cx="512" cy="540" rx="420" ry="380" fill="url(#brandGlow)"/>
+
+  <!-- Subtle grain on the base -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="#ffffff" filter="url(#grain)" opacity="0.7"/>
+
+  <!-- ── The gem ─────────────────────────────────────────────────────── -->
+  <!-- Gem is built from 5 triangular facets meeting at center-top + bottom.
+       Vertices (centered around 512,520, total height ~620, width ~520):
+            T1(312,290) ─── T2(512,210) ─── T3(712,290)
+              \              │              /
+               \   L(312,290)│R(712,290)   /
+            CL(380,500)  CR(644,500)
+              \              │              /
+                B(512,810)
+  -->
+  <g filter="url(#gemShadow)">
+    <!-- Background plate of the gem (subtle outer cut) -->
+    <path d="M 312 290 L 512 200 L 712 290 L 644 510 L 512 820 L 380 510 Z"
+          fill="#1a0a16" stroke="#3a1428" stroke-width="2"/>
+
+    <!-- Left side facet (violet) -->
+    <path d="M 312 290 L 380 510 L 512 820 L 312 290 Z" fill="url(#facetLeft)"/>
+
+    <!-- Right side facet (indigo) -->
+    <path d="M 712 290 L 644 510 L 512 820 L 712 290 Z" fill="url(#facetRight)"/>
+
+    <!-- Top-left upper facet (ruby) -->
+    <path d="M 312 290 L 512 200 L 460 410 L 380 510 Z" fill="url(#facetTop)"/>
+
+    <!-- Top-right upper facet (ruby-cool) -->
+    <path d="M 512 200 L 712 290 L 644 510 L 564 410 Z" fill="url(#facetRight)" opacity="0.92"/>
+
+    <!-- Center diamond facet — brightest, top-middle -->
+    <path d="M 512 200 L 564 410 L 512 460 L 460 410 Z" fill="url(#facetCenter)"/>
+
+    <!-- Bottom-left facet (darker) -->
+    <path d="M 380 510 L 460 410 L 512 460 L 512 820 Z" fill="url(#facetBottom)" opacity="0.92"/>
+
+    <!-- Bottom-right facet (darker) -->
+    <path d="M 644 510 L 564 410 L 512 460 L 512 820 Z" fill="url(#facetBottom)"/>
+
+    <!-- Top-edge sheen on the upper facets -->
+    <path d="M 312 290 L 512 200 L 712 290 L 644 296 L 512 224 L 380 296 Z"
+          fill="url(#topSheen)" opacity="0.85"/>
+
+    <!-- Specular sparkle near top-left -->
+    <ellipse cx="430" cy="280" rx="40" ry="20" fill="url(#sparkle)" opacity="0.85"
+             transform="rotate(-22, 430, 280)"/>
+
+    <!-- Tiny bright pinpoint star -->
+    <circle cx="460" cy="268" r="6" fill="#ffffff" opacity="0.9"/>
+    <circle cx="460" cy="268" r="12" fill="#ffffff" opacity="0.25"/>
+
+    <!-- Inner reflective line down the centre -->
+    <path d="M 512 200 L 512 460 L 512 820"
+          stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.18" fill="none"/>
+
+    <!-- Hairline edges -->
+    <path d="M 312 290 L 380 510 L 512 820 L 644 510 L 712 290 L 512 200 Z"
+          fill="none" stroke="#000000" stroke-opacity="0.45" stroke-width="2"/>
+    <path d="M 312 290 L 460 410 M 712 290 L 564 410 M 380 510 L 512 460 L 644 510"
+          stroke="#000000" stroke-opacity="0.32" stroke-width="1.5" fill="none"/>
+  </g>
+
+  <!-- ── Inner-bevel highlight on the rounded base ────────────────────── -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224"
+        fill="url(#bevel)" pointer-events="none"/>
+
+  <!-- ── Outer 1px hairline for crispness ─────────────────────────────── -->
+  <rect x="1" y="1" width="1022" height="1022" rx="223" ry="223"
+        fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+</svg>

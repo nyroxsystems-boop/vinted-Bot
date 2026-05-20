@@ -9,13 +9,20 @@
 //      reload) from the Rust-side snapshot (last N log lines + current status).
 // ──────────────────────────────────────────────────────────────────────────────
 
+mod local_update;
 mod services;
+mod tarball_update;
 mod updates;
 
 use std::sync::Arc;
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
+use crate::local_update::{plan_reload, rebuild_and_install, emit_progress, ReloadPlan};
 use crate::services::{find_repo_root, InitialState, Supervisor};
+use crate::tarball_update::{
+    apply_update as apply_tarball, check_update as check_tarball, version_info,
+    TarballManifest, VersionInfo,
+};
 use crate::updates::{apply_update, check_for_updates, UpdateInfo};
 
 struct AppState {
@@ -31,25 +38,6 @@ fn frontend_ready(app: tauri::AppHandle, state: tauri::State<AppState>) -> Initi
 #[tauri::command]
 fn get_state(state: tauri::State<AppState>) -> InitialState {
     state.supervisor.snapshot()
-}
-
-#[tauri::command]
-fn open_dashboard(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("dashboard") {
-        let _ = win.show();
-        let _ = win.set_focus();
-        return Ok(());
-    }
-    let url = tauri::Url::parse("http://localhost:5173").map_err(|e| e.to_string())?;
-    WebviewWindowBuilder::new(&app, "dashboard", WebviewUrl::External(url))
-        .title("Vinted-System · Dashboard")
-        .inner_size(1440.0, 900.0)
-        .min_inner_size(1200.0, 720.0)
-        .center()
-        .resizable(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -90,6 +78,39 @@ fn start_service(
     Ok(())
 }
 
+/// Stop & start every Node service. Does NOT touch the Tauri shell or pull
+/// new code — just bounces the worker processes so they pick up settings
+/// changes, recover from a stuck state, or release wedged ports. Used by the
+/// "Services neu starten"-button in the Diagnose-Panel.
+#[tauri::command]
+fn restart_all_services(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    state.supervisor.restart_all(&app);
+    Ok(())
+}
+
+// ── Tarball update path — production end-user updates without git ──────────
+
+#[tauri::command]
+fn app_version(state: tauri::State<AppState>) -> VersionInfo {
+    version_info(&state.supervisor.repo_root)
+}
+
+#[tauri::command]
+fn check_tarball_update(state: tauri::State<AppState>) -> Result<TarballManifest, String> {
+    let info = version_info(&state.supervisor.repo_root);
+    check_tarball(&info.manifest_url, &info.version)
+}
+
+#[tauri::command]
+fn apply_tarball_update(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    manifest: TarballManifest,
+) -> Result<(), String> {
+    let sup = state.supervisor.clone();
+    apply_tarball(&sup.repo_root, &sup.npm_path, &sup, &manifest, &app)
+}
+
 /// "Full restart": stop services, write a shell script with the exact
 /// update-then-relaunch sequence, open it in a new Terminal window,
 /// then quit the current app. The user ends up with a clean terminal
@@ -100,56 +121,80 @@ fn full_restart(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<
     sup.stop_all();
 
     let repo = sup.repo_root.display().to_string();
-    let script = format!(
-        "#!/bin/bash\n\
-         set -e\n\
-         echo '════════════════════════════════════════'\n\
-         echo '  Vinted-System — Update + Neustart'\n\
-         echo '════════════════════════════════════════'\n\
-         cd \"{repo}\"\n\
-         echo '▶ git pull'\n\
-         git pull\n\
-         echo '▶ npm install'\n\
-         npm install\n\
-         echo '▶ npm run app:dev'\n\
-         exec npm run app:dev\n",
-        repo = repo
-    );
-    let script_path = "/tmp/vinted-restart.command";
-    std::fs::write(script_path, &script).map_err(|e| format!("write script: {}", e))?;
+
+    // Platform-aware: write a shell script on Unix, a .bat on Windows, then
+    // launch it in a fresh Terminal / cmd.exe window so the user sees the
+    // update progress live.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(script_path, std::fs::Permissions::from_mode(0o755));
-    }
-
-    // Open Terminal.app with the script. Try two ways — if `open -a Terminal`
-    // doesn't work for some reason (quarantine, weird default app), fall
-    // back to AppleScript.
-    let mut opened = std::process::Command::new("/usr/bin/open")
-        .arg("-a")
-        .arg("Terminal.app")
-        .arg(script_path)
-        .spawn()
-        .is_ok();
-
-    if !opened {
-        let apple = format!(
-            "tell application \"Terminal\" to do script \"{}\"",
-            script_path
+    let (script_path, opened) = {
+        let script = format!(
+            "#!/bin/bash\n\
+             set -e\n\
+             echo '════════════════════════════════════════'\n\
+             echo '  Vinted-System — Update + Neustart'\n\
+             echo '════════════════════════════════════════'\n\
+             cd \"{repo}\"\n\
+             echo '▶ git pull'\n\
+             git pull\n\
+             echo '▶ npm install'\n\
+             npm install\n\
+             echo '▶ npm run app:dev'\n\
+             exec npm run app:dev\n",
+            repo = repo
         );
-        opened = std::process::Command::new("/usr/bin/osascript")
-            .arg("-e")
-            .arg(apple)
+        let path = "/tmp/vinted-restart.command";
+        std::fs::write(path, &script).map_err(|e| format!("write script: {}", e))?;
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
+
+        // Try `open -a Terminal` first; fall back to AppleScript.
+        let mut ok = std::process::Command::new("/usr/bin/open")
+            .arg("-a").arg("Terminal.app").arg(path).spawn().is_ok();
+        if !ok {
+            let apple = format!("tell application \"Terminal\" to do script \"{}\"", path);
+            ok = std::process::Command::new("/usr/bin/osascript")
+                .arg("-e").arg(apple).spawn().is_ok();
+        }
+        (path.to_string(), ok)
+    };
+    #[cfg(windows)]
+    let (script_path, opened) = {
+        // Use TEMP env-var; fall back to C:\Windows\Temp if not set.
+        let temp = std::env::var("TEMP").unwrap_or_else(|_| String::from(r"C:\Windows\Temp"));
+        let path = format!(r"{}\vinted-restart.bat", temp);
+        let script = format!(
+            "@echo off\r\n\
+             echo ============================================\r\n\
+             echo   Vinted-System -- Update + Neustart\r\n\
+             echo ============================================\r\n\
+             cd /d \"{repo}\"\r\n\
+             echo Running: git pull\r\n\
+             git pull\r\n\
+             echo Running: npm install\r\n\
+             call npm install\r\n\
+             echo Running: npm run app:dev\r\n\
+             call npm run app:dev\r\n\
+             pause\r\n",
+            repo = repo
+        );
+        std::fs::write(&path, &script).map_err(|e| format!("write script: {}", e))?;
+        // Launch in a new cmd window. `cmd /c start ""` opens a detached window
+        // and returns immediately so we can exit the current process cleanly.
+        let ok = std::process::Command::new("cmd")
+            .args(["/c", "start", "", "cmd", "/k", &path])
             .spawn()
             .is_ok();
-    }
+        (path, ok)
+    };
 
     if !opened {
+        eprintln!(
+            "[full_restart] failed to open shell (script at {} for repo {})",
+            script_path, repo
+        );
         return Err(
-            "Konnte Terminal.app nicht öffnen. Bitte manuell ausführen: \
-             `cd {REPO} && git pull && npm install && npm run app:dev`"
-                .replace("{REPO}", &repo),
+            "Konnte Terminal nicht öffnen. Bitte App neu starten oder Support kontaktieren."
+                .to_string(),
         );
     }
 
@@ -164,7 +209,66 @@ fn full_restart(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<
     Ok(())
 }
 
-// ── Auto-update commands ────────────────────────────────────────────────────
+// ── Local reload commands (pick up code changes without git) ────────────────
+
+#[tauri::command]
+fn plan_local_reload(state: tauri::State<AppState>) -> ReloadPlan {
+    plan_reload(&state.supervisor.repo_root)
+}
+
+/// The "Update jetzt"-button handler.
+/// - If rebuild is needed: stops services, rebuilds the .app bundle, installs
+///   it to /Applications, then quits so the user relaunches the fresh build.
+/// - Otherwise: restarts the three Node services so they reload TS on boot.
+#[tauri::command]
+fn reload_all(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<ReloadPlan, String> {
+    let sup = state.supervisor.clone();
+    let plan = plan_reload(&sup.repo_root);
+
+    emit_progress(&app, "stopping", "Stoppe Services…");
+    sup.stop_all();
+    std::thread::sleep(std::time::Duration::from_millis(600));
+
+    if plan.needs_rebuild {
+        // Rebuild blocks for 2–3 minutes. Rust code / dashboard bundle
+        // changes require the shipped .app to be regenerated and the
+        // running process (which IS the old binary) to exit.
+        let repo_root = sup.repo_root.clone();
+        let npm_path = sup.npm_path.clone();
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            match rebuild_and_install(&repo_root, &npm_path, &app_handle) {
+                Ok(_) => {
+                    emit_progress(
+                        &app_handle,
+                        "relaunching",
+                        "Fertig gebaut — App wird in 3 s beendet, bitte neu starten.",
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    app_handle.exit(0);
+                }
+                Err(e) => {
+                    emit_progress(&app_handle, "error", &format!("Build fehlgeschlagen: {}", e));
+                }
+            }
+        });
+        return Ok(plan);
+    }
+
+    // Fast path: only Node services changed — tsx will pick up TS changes
+    // when we respawn them.
+    emit_progress(&app, "starting", "Starte Services mit neuem Code…");
+    for def in sup.defs.clone() {
+        sup.start_one(&app, &def);
+    }
+    emit_progress(&app, "done", "Services laufen mit aktuellem Code.");
+    Ok(plan)
+}
+
+// ── Git-based update commands (origin/main pull) ────────────────────────────
 
 #[tauri::command]
 fn check_updates(state: tauri::State<AppState>) -> Result<UpdateInfo, String> {
@@ -204,6 +308,50 @@ pub fn run() {
 
     let supervisor = Supervisor::new(repo_root);
 
+    // Install a Unix-signal handler so that SIGINT/SIGTERM/SIGHUP from the
+    // CLI (Ctrl-C, `kill <pid>`, terminal-close) cleanly stops every spawned
+    // child instead of orphaning them. Without this the Tauri main process
+    // dies but the npm/tsx subprocesses keep running and hold their ports.
+    //
+    // The GUI close-button still flows through `on_window_event` →
+    // `app.exit(0)` → `RunEvent::Exit` → `stop_all()`. This handler is a
+    // belt-and-braces backup for non-GUI termination paths.
+    #[cfg(unix)]
+    {
+        let sup_for_signals = supervisor.clone();
+        std::thread::spawn(move || {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static HANDLED: AtomicBool = AtomicBool::new(false);
+            // Use a simple polling approach with libc::signal — the `signal`
+            // crate would be cleaner but we want zero extra dependencies.
+            // SAFETY: signal() is async-signal-safe; the handler only sets a
+            // flag and writes to a self-pipe via std::process::exit().
+            extern "C" fn handle_term(_sig: i32) {
+                // Re-entrant guard — multiple signals shouldn't crash us.
+                static IN_HANDLER: AtomicBool = AtomicBool::new(false);
+                if IN_HANDLER.swap(true, Ordering::SeqCst) { return; }
+                // Trigger normal exit-flow which Rust runtime will translate
+                // to the global Drop / atexit chain. We piggy-back via a
+                // shared flag that the polling thread observes.
+                HANDLED.store(true, Ordering::SeqCst);
+            }
+            unsafe {
+                libc::signal(libc::SIGINT, handle_term as libc::sighandler_t);
+                libc::signal(libc::SIGTERM, handle_term as libc::sighandler_t);
+                libc::signal(libc::SIGHUP, handle_term as libc::sighandler_t);
+            }
+            // Poll for the flag — when set, stop every child and exit.
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                if HANDLED.load(Ordering::SeqCst) {
+                    eprintln!("[signal] termination signal received — stopping all services");
+                    sup_for_signals.stop_all();
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
@@ -212,19 +360,36 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             frontend_ready,
             get_state,
-            open_dashboard,
             restart_service,
             stop_service,
             start_service,
+            restart_all_services,
             full_restart,
             check_updates,
-            apply_updates
+            apply_updates,
+            plan_local_reload,
+            reload_all,
+            app_version,
+            check_tarball_update,
+            apply_tarball_update
         ])
         .setup(|app| {
+            eprintln!("[setup] entered");
+            // Kick off the supervisor IMMEDIATELY so Node services start
+            // booting in parallel with the frontend.
+            match app.try_state::<AppState>() {
+                Some(state) => {
+                    eprintln!("[setup] starting supervisor");
+                    state.supervisor.start_all_once(&app.handle());
+                    eprintln!("[setup] supervisor kicked off");
+                }
+                None => eprintln!("[setup] ERROR: AppState not available"),
+            }
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") {
                 w.open_devtools();
             }
+            eprintln!("[setup] done");
             Ok(())
         })
         .on_window_event(|window, event| {

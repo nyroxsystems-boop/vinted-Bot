@@ -1,37 +1,42 @@
 # Vinted-System
 
-Privates Automations-Monorepo mit zwei Playwright-Bots (Vinted-Chat-Management, Temu-Auto-Bestellung) und einem React-Dashboard zur Steuerung.
+Vinted-only Verkaufs-Automation mit **CJ Dropshipping** als Fulfillment-Backend
+und automatischem **Re-Listing nach jedem Sale**. React-Dashboard zur Steuerung.
 
 > ⚠️ **Rechtlicher Hinweis**
 >
-> - Automatisierte Interaktion mit Vinted und Temu verstößt gegen deren AGB. Account-Sperren sind wahrscheinlich, nur eine Frage der Zeit.
+> - Automatisierte Interaktion mit Vinted verstößt gegen deren AGB. Account-Sperren sind wahrscheinlich, nur eine Frage der Zeit.
 > - Als Verkäufer bist du rechtlich Händler: Widerrufsrecht, Impressumspflicht, Gewährleistung, ggf. Umsatzsteuer. Kläre das vor Live-Betrieb.
-> - Dropshipping von Temu zu Vinted-Käufern ist ein Graubereich. Käufer erwarten u. U. etwas anderes als sie bekommen — das Retouren-/Bewertungsrisiko ist hoch.
+> - Dropshipping zu Vinted-Käufern ist ein Graubereich. Käufer erwarten u. U. etwas anderes als sie bekommen — das Retouren-/Bewertungsrisiko ist hoch.
 >
 > Dieses Projekt ist ein technisches Werkzeug. Die Verantwortung für den Einsatz liegt beim Nutzer.
 
 ---
 
-## Architektur
+## Architektur (Vinted-only)
 
 ```
-┌──────────┐   REST/SSE   ┌──────────────┐   HTTP   ┌────────────┐
-│Dashboard │ ───────────▶ │ Orchestrator │ ───────▶ │ vinted-bot │
-│ (React)  │ ◀─────────── │  (Express)   │          │ (Playwright)│
-└──────────┘              │ + Scheduler  │          └────────────┘
-                          │ + Pipeline   │          ┌────────────┐
-                          │   SQLite     │ ───────▶ │  temu-bot  │
-                          └──────────────┘          │ (Playwright)│
-                                                    └────────────┘
+┌──────────┐   REST/SSE   ┌──────────────┐   HTTP   ┌─────────────────┐
+│Dashboard │ ───────────▶ │ Orchestrator │ ───────▶ │ vinted-bot :4701│
+│ (React)  │ ◀─────────── │  (Express)   │          └─────────────────┘
+└──────────┘              │ + Scheduler  │
+                          │ + Workers:   │   HTTP   ┌─────────────────┐
+                          │   - auto-pub │ ───────▶ │ cj-service :4720│
+                          │   - cj-fulf. │          │ → CJ API v2.0   │
+                          │   - relister │          └─────────────────┘
+                          │   - replier  │
+                          │   - repricer │
+                          │   SQLite     │
+                          └──────────────┘
 ```
 
-- **shared/** — geteilte Types, SQLite-Wrapper, Logger, Queue, Playwright-Helper, Offer-Regeln.
-- **vinted-bot/** — pollt Inbox, erkennt Angebote, klickt Accept/Decline (HTTP-API auf `:4701`).
-- **temu-bot/** — bestellt bei Temu auf Käuferadresse, trackt Status (`:4702`).
-- **orchestrator/** — Express-Server `:4700` + Scheduler + State-Machine + SSE-Live-Feed.
-- **dashboard/** — React-UI `:5173`, konsumiert `/api` und `/stream`.
+- **shared/** — geteilte Types, SQLite-Wrapper, Logger, Inventory-Locks.
+- **vinted-bot/** :4701 — Playwright-Bot, pollt Inbox, erkennt Angebote/Sales, erstellt Listings.
+- **cj-service/** :4720 — REST-Bridge zur CJ Dropshipping API v2.0.
+- **orchestrator/** :4700 — Express + alle Worker + SSE-Live-Feed.
+- **dashboard/** :5173 — React-UI.
 
-Die Pipeline: **Offer erkannt → evaluate → Accept → Sale → Temu-Order → Tracking**. Jeder Schritt ist idempotent und persistiert, sodass ein Crash die Pipeline am letzten Zustand wieder aufnimmt.
+**Pipeline:** `Listing → Offer → Accept → Sale → CJ-Order → Tracking → Re-Listing nach 24h`. Idempotent, crash-safe.
 
 ---
 
@@ -40,169 +45,131 @@ Die Pipeline: **Offer erkannt → evaluate → Accept → Sale → Temu-Order �
 Voraussetzungen: Node ≥ 20, npm ≥ 10.
 
 ```bash
-cd Vinted-System
-
-# 1. Dependencies + Chromium installieren (dauert 1-2 min)
+cd system
 npm install
 npx playwright install chromium
-
-# 2. .env anlegen aus Vorlage
 cp .env.example .env
-# ...dann .env editieren (optional: VINTED_EMAIL, TEMU_EMAIL, Port-Änderungen)
-
-# 3. Datenbank migrieren
+# .env editieren: CJ_EMAIL, CJ_PASSWORD (API Key, nicht Account-PW), ANTHROPIC_API_KEY
 npm run db:migrate
 ```
 
-### Einmalig: Login in beiden Shops
-
-Die Bots loggen sich **nicht automatisch** ein. Du öffnest einmal den Browser manuell, loggst dich ein (inkl. 2FA und — bei Temu — der Zahlungsmethode), und die Session wird gespeichert. Danach nutzen die Bots die gespeicherte Session.
+### Einmaliges Login: Vinted
 
 ```bash
-npm run vinted:login   # öffnet Vinted, du meldest dich an
-npm run temu:login     # öffnet Temu, du meldest dich an + fügst Zahlungsmethode hinzu
+npm run vinted:login   # öffnet Browser headful, du loggst dich ein
 ```
 
-Sessions landen in:
-- `vinted-bot/playwright-data/state.json`
-- `temu-bot/playwright-data/state.json`
+Session landet in `vinted-bot/playwright-data/state.json`.
+
+### CJ-API-Key besorgen
+
+1. CJDropshipping Account anlegen (kostenlos)
+2. Im Account → Setting → Open API
+3. **App-Key** erzeugen — das ist dein `CJ_PASSWORD` in `.env` (Email = `CJ_EMAIL`)
+4. **Daily-Quota:** Default 1000 Calls/Tag. Für mehr → Approval-Antrag (siehe FAQ)
 
 ---
 
 ## Start
 
-### Variante A: Native Mac-App (empfohlen)
-
-Eine Tauri-App mit Services-Konsole + Dashboard in zwei nativen Fenstern:
-
+**Variante A — Native Mac-App (empfohlen):**
 ```bash
 npm run app:dev
 ```
 
-Was passiert:
-1. Tauri startet → öffnet **Services-Konsole-Fenster** (dunkles UI, Live-Logs je Service)
-2. Supervisor spawnt orchestrator, vinted-bot, temu-bot, dashboard als Child-Prozesse
-3. Logs + Status-Dots sind live sichtbar pro Service
-4. Klick auf **„Dashboard öffnen"** → zweites Fenster mit der React-UI
-5. App schließen → alle 4 Services werden sauber beendet
-
-Für einen bundled `.app` zum Draggen nach /Programme:
-
+**Variante B — Terminal:**
 ```bash
-npm run app:build
-# Output: app/src-tauri/target/release/bundle/dmg/Vinted-System_0.1.0_aarch64.dmg
-#         app/src-tauri/target/release/bundle/macos/Vinted-System.app
+npm run dev           # orchestrator + vinted-bot + cj-service + dashboard
+npm run dev:core      # synonym
 ```
 
-Die `.app` braucht die `Vinted-System/`-Repo-Ordner auf der Platte (für `npm run` der Services). Setze `VINTED_SYSTEM_ROOT=/absoluter/pfad` als Env-Var falls die Auto-Erkennung scheitert.
-
-### Variante B: Ohne App, nur Terminal
-
-Alle 4 Services auf einmal (Orchestrator + Bots + Dashboard):
-
+Einzelne Services:
 ```bash
-npm run dev
+npm run dev:orchestrator  # :4700
+npm run dev:vinted        # :4701
+npm run dev:cj            # :4720
+npm run dev:dashboard     # :5173
 ```
 
-Einzeln:
-
+PM2 (Produktion auf Mac/Linux):
 ```bash
-npm run dev:orchestrator    # :4700
-npm run dev:vinted          # :4701
-npm run dev:temu            # :4702
-npm run dev:dashboard       # :5173
+npm run pm2:start
+npm run pm2:logs
+npm run pm2:status
 ```
 
 Dashboard: **http://localhost:5173**
 
 ---
 
-## Geschäftsmodell (Batch-Cart + Re-Shipping)
+## Workflow (vollautomatisch nach Setup)
 
-Das System nutzt ein **Batch-Cart-Modell** in Kombination mit Re-Shipping:
+1. **Listings importieren / generieren** — auto_listings-Zeilen mit Fotos + CJ-URL füllen (Script oder Dashboard).
+2. **CJ-Mapping aufbauen** — `node scripts/cj-resolve-mappings.mjs` füllt cj_product_id + cj_variant_id pro Folder.
+3. **Approve** — Status der auto_listings von `draft` auf `approved`. Kann Bulk-SQL oder Dashboard.
+4. **Auto-Publisher** schiebt 1 Listing/Min auf Vinted (gedeckelt durch `vinted_daily_publish_cap`).
+5. **Käufer kauft** → vinted-bot detektiert Sale → schreibt `sales`-Row.
+6. **Re-Lister** stempelt `auto_listings.sold_at` + setzt `inventory_locks.is_sold=1`.
+7. **CJ-Fulfillment** sieht die paid Sale → bestellt bei CJ → schreibt `cj_orders`.
+8. **24h nach Sale** clont der Re-Lister das Listing → `status='approved'` → Auto-Publisher schiebt es wieder live.
+9. **Tracking** pollt der cj-fulfillment Worker alle 6h für ordered Orders (Cooldown), bei tracking-Number → Update `sales.tracking_number` → vinted-bot pusht es in den Chat.
+10. **Delivery** wird alle 24h gepollt; nach `delivered` → Vinted-Auszahlung freigeschaltet.
 
-1. Vinted-Käufer kauft → bezahlt → Vinted generiert automatisch ein Versandetikett
-2. System sammelt alle verkauften Artikel über ein Zeitfenster (z. B. 24h, 48h, 7 Tage)
-3. **Du klickst im Dashboard „Batch erstellen"** → Bot öffnet Temu, geht zu jedem Produkt, wählt die Größe, klickt „In den Warenkorb"
-4. **Du klickst „Zu Temu-Warenkorb"** → Temu öffnet sich mit vollem Warenkorb → du bezahlst **einmal** für alle Items
-5. Temu liefert ALLE Pakete gesammelt an DICH (eine Lieferung, spart Versandkosten)
-6. Du klebst pro Paket das Vinted-Label drauf, gibst alles bei Hermes/DHL ab
+**Daily-Caps eingebaut:**
+- Vinted-Publish: 30 neue Listings / Account / Tag (`vinted_daily_publish_cap`)
+- CJ-Orders: 50 / Tag (`cj_max_daily_orders`)
+- Re-Lists: 30 / Tag (`relist_max_per_day`)
 
-**Vorteile gegenüber Auto-Order:**
-- Volle Kontrolle: du siehst den ganzen Warenkorb vor dem Bezahlen
-- Keine Bot-Automation beim Bezahlen → viel sicherer (keine 3DS/Captcha-Probleme)
-- Eine Temu-Bestellung statt viele → weniger Versand, Rabatt-Schwellen leichter erreichbar
-- Skaliert: 1 Verkauf oder 20 — dasselbe Procedere
+---
 
-## Workflow
+## Re-Listing-Mechanismus
 
-1. **Listings anlegen** (Dashboard → *Listings*)
-   - Vinted-URL, Titel, Listpreis, Mindestpreis (Auto-Accept-Schwelle)
-   - **Temu-URL inkl. `?spec_id=...`** (Farbe in der URL — einmal auf Temu auswählen und URL kopieren)
-   - Variante als JSON `{"size":"M"}` (nur Größe — Farbe steckt in der URL)
-   - Dry-Run für Beobachtungs-Modus
-2. **Bot läuft automatisch**: pollt Inbox alle 60 s, akzeptiert Angebote ≥ min_accept_price
-3. **Verkauft wird autonom** — aber es wird NICHT automatisch bei Temu bestellt
-4. **Du entscheidest, wann du den Temu-Teil startest:**
-   - Dashboard → *Fulfillment*
-   - Zeitfenster wählen: `12h`, `24h`, `48h`, `3T`, `7T`
-   - Siehst alle bezahlten Verkäufe im Fenster
-   - Klick *„Batch erstellen"* → erzeugt einen Batch
-   - Klick *„In Warenkorb legen"* → Bot legt alle Items bei Temu in den Cart
-   - Klick *„Zu Temu-Warenkorb"* → öffnet Temu in deinem Browser mit vollem Cart
-   - Du bezahlst wie gewohnt, klickst „Als bezahlt markieren" im Dashboard
-5. **Tracking + Weiterversand**: Dashboard *Verkäufe* zeigt Status pro Sale
+Nach jedem Sale läuft folgender Lifecycle automatisch:
 
-## Analytics
-
-Dashboard → *Analytics* zeigt dir:
-- **Umsatz pro Tag** (Area-Chart, 7/14/30/90 Tage)
-- **Angebote pro Tag** (eingegangen / akzeptiert / bezahlt als Bar-Chart)
-- **Conversion-Funnel**: Offers → Accepted → Paid → Erfüllt (mit %-Raten)
-- **Bestseller-Ranking**: Top 10 Listings nach Verkaufszahlen
-
-## Dashboard-Struktur
-
-Professionelles Sidebar-Layout mit folgenden Bereichen:
-- **Übersicht** — KPIs, 14-Tage-Umsatz-Chart, Bot-Status
-- **Fulfillment** — Batch-Cart-Workflow (das Kernstück)
-- **Listings** — Vinted ↔ Temu Mapping pflegen
-- **Angebote** — Review-Queue für nicht-auto-akzeptierte Offers
-- **Chats** — Live-Chat-Viewer, Angebote erkennen
-- **Analytics** — Charts, Bestseller, Funnel
-- **Live-Logs** — SSE-Event-Stream vom Orchestrator
-- **Einstellungen** — Pause-Switch, Poll-Intervalle, Temu-Zahlungsmethode, Batch-Fenster
-
-## Voraussetzungen in Temu (einmalig einrichten)
-
-Bevor du den Bot startest, musst du in deinem Temu-Account manuell:
-- Eine **Lieferadresse** hinterlegen (deine Heimatadresse) und als Default setzen
-- Eine **Zahlungsmethode** konfigurieren — siehe nächster Abschnitt
-
-Der Bot gibt **niemals** Kartendaten oder Adressen selbst ein.
-
-## Zahlungsmethoden (wichtig!)
-
-Temu hat **keine „Default-Zahlung"**-Funktion — der Bot muss bei jedem Checkout aktiv eine auswählen. Im Dashboard unter *Einstellungen → Temu-Zahlungsmethode* wählst du einmal global:
-
-| Methode | Bot-tauglich? | Setup | Anmerkung |
-|---|---|---|---|
-| **PayPal** ✅ (empfohlen) | Ja | einmal in PayPal eingeloggt sein → Session-Cookie bleibt | Läuft am stabilsten. Nach 2–4 Wochen neu einloggen. |
-| **Bezahlen Nach 30 Tagen** ✅ | Ja | einmal durchklicken, Geburtsdatum bestätigen | Klarna-basiert. Nach dem ersten Mal zinsfreie 30 Tage BNPL. |
-| **Rechnung** ✅ | Ja | einmal Geburtsdatum bestätigen | Auch Klarna-basiert. |
-| **Karte** ⚠️ | Nur bedingt | Karte im Temu-Konto hinterlegt | Wenn Bank 3DS triggert → Bot pausiert, SMS-Code nötig. |
-| Apple Pay ❌ | Nein | — | Touch-ID / Face-ID auf Gerät nötig. |
-| Google Pay ❌ | Nein | — | Gleich wie Apple Pay. |
-| Sofort bezahlen ❌ | Nein | — | Bank-Login + TAN nötig. |
-| Pay By Bank ❌ | Nein | — | Bank-Login nötig. |
-
-**Erstes Setup (einmalig):**
-```bash
-npm run temu:login
 ```
-öffnet den Browser headful. Du loggst dich bei Temu ein UND klickst einmal durch die Zahlungsmethode deiner Wahl (z. B. PayPal-Login), damit die Session-Cookies gespeichert werden. Danach läuft alles automatisch.
+auto_listing X (status=published, sold_at=NULL)
+   ↓ Verkauf wird erkannt
+auto_listing X (status=published, sold_at=NOW)
+inventory_locks.is_sold=1
+listings.status=sold
+   ↓ Re-Lister tickt alle 30 min
+   ↓ Wartet bis sold_at + 24h vorbei
+   ↓ Prüft daily-cap (30/Tag) + kein anderes aktives Sibling
+   ↓ Klont row → INSERT INTO auto_listings(status='approved', parent_folder_num=X)
+   ↓ Auto-Publisher schiebt es in <60s an Vinted
+neuer auto_listing Y (status=published, parent_folder_num=X, relist_count=N+1)
+```
 
-**Wenn die Session stirbt:** Der Bot erkennt PayPal-Login-Screens und andere Auth-Prompts und bricht die Bestellung ab mit einer klaren Fehlermeldung im Dashboard. Du machst dann einfach erneut `npm run temu:login` — fertig.
+**Settings:**
+- `relist_enabled` (default `true`)
+- `relist_delay_hours` (default `24`)
+- `relist_max_per_day` (default `30`)
+- `relist_inactive_pause_days` (default `21`) — pausiert Folder ohne Sale > 21d
+
+**Pausieren/Forcieren via Dashboard-API:**
+```bash
+curl -X POST http://localhost:4700/api/relist/pause/{folder_num}
+curl -X POST http://localhost:4700/api/relist/resume/{folder_num}
+curl -X POST http://localhost:4700/api/relist/now/{folder_num}  # skip 24h delay
+```
+
+---
+
+## CJ-Quota: was du wissen musst
+
+CJ erlaubt standard **1000 Calls/Tag**. Pro Sale-Lifecycle verbraucht das System **~17 Calls** (1 Order + 2–4 Tracking-Polls + 10–14 Delivery-Polls). **→ ~50 Sales/Tag passen ins Limit.**
+
+Polling läuft mit **Cooldowns**:
+- Tracking: alle 6h pro Order
+- Delivery: alle 24h pro Order
+
+Bei `ordered` > 48h ohne Tracking → automatischer Telegram-Alert.
+
+**Höheres Quota beantragen:** `developer@cjdropshipping.com` oder Website-Chat. CJ verlangt:
+1. Integration-Demo-Video
+2. Backend-Screenshot mit Storenamen
+3. CJ-User-ID + verifizierter Email + WhatsApp
+4. Business-Identity (Firma oder Personal-ID)
 
 ---
 
@@ -210,92 +177,76 @@ npm run temu:login
 
 | Feature | Wo |
 |---|---|
-| Hard-Stop-Schalter | Dashboard → Übersicht → „System PAUSIEREN" |
-| Max. € pro Temu-Order | `settings.temu_max_order_eur` (Default 50 €) |
-| Max. Temu-Orders/24h | `settings.temu_max_daily_orders` (Default 10) |
-| Dry-Run je Listing | Listing-Editor → Checkbox |
-| Circuit-Breaker | 5 Fehler → 5 min Pause (Vinted), 3 → 10 min (Temu) |
-| Captcha-Detection | Bot pausiert Job, sendet Alert via SSE |
-| Idempotenz-Key | `sale-<id>` verhindert Doppelbestellungen |
-| Keine Kartendaten | Temu-Bot nutzt NUR vorher gespeicherte Zahlungsmethode |
+| Hard-Stop-Schalter | Dashboard → "System PAUSIEREN" |
+| Vinted-Daily-Cap | `vinted_daily_publish_cap` (default 30) |
+| CJ-Max-Order-€ | `cj_max_order_eur` (default 30) |
+| CJ-Daily-Cap | `cj_max_daily_orders` (default 50) |
+| Re-List-Daily-Cap | `relist_max_per_day` (default 30) |
+| Re-List-Pause inaktive Folder | `relist_inactive_pause_days` (default 21) |
+| Photo-Pre-Check vor Publish | Auto-Publisher prüft Files existieren |
+| CAPTCHA-Detection | Auto-Publisher kategorisiert Fail-Reason, alerted |
+| Idempotenz | `cj_orders.uniq_sale`, `inventory_locks.folder_num` PK |
 
 ---
 
-## Verifikation (End-to-End)
+## Operational Runbook
 
-1. `npm install && npm run db:migrate` — keine Fehler.
-2. `npm run vinted:login` öffnet Browser, Login-Flow funktioniert, `state.json` entsteht.
-3. `npm run dev` startet alle 4 Services — Dashboard erreichbar.
-4. Listing mit `dry_run=true` anlegen → erscheint in Übersicht-KPIs.
-5. `settings.paused=true` setzen → Scheduler überspringt Zyklen (Logs).
-6. Realer Test mit 1 günstigem Artikel (< 5 €, `TEMU_MAX_ORDER_EUR=5` in `.env`): Vollzyklus von Offer → Accept → Temu-Order verifizieren.
-7. Bot-Prozess killen, neu starten → Pipeline setzt am letzten DB-State fort.
-8. Temu-URL absichtlich falsch setzen → nach 3 Fails Circuit-Breaker, Alert im Dashboard.
+### Was tun bei "Listing failed (captcha)"?
+1. Vinted-Account manuell öffnen, CAPTCHA lösen, einloggen.
+2. `npm run vinted:login` (Session refresh).
+3. Auto-Publisher pickt nächstes approved Listing automatisch.
 
----
-
-## Selektor-Wartung
-
-Vinted und Temu ändern ihr DOM regelmäßig. Wenn ein Bot bricht, prüfe zuerst:
-
-- `vinted-bot/src/selectors.ts`
-- `temu-bot/src/selectors.ts`
-
-### Was verifiziert ist (Stand April 2026)
-
-**Vinted:**
-- Next.js App Router + React Server Components → initial HTML ist nur Skelett
-- Design-System-Prefix: `web_ui__*` (z.B. `web_ui__Text__text`, `web_ui__Cell__cell`)
-- Artikel-Karten: `.new-item-box__container`
-- Artikel-URL: `/items/{id}-{slug}`
-
-**Temu:**
-- Initiales HTML ist obfuskiertes JS (lädt alles von `static.kwcdn.com`)
-- Aggressives Anti-Scraping — Selektoren ändern sich häufig
-
-### Was unverified ist
-
-Alle Selektoren für **eingeloggte Bereiche** (Inbox, Konversation, Offer-Karte, Accept-Button, Temu-Checkout) sind Templates mit Fallback-Ketten, aber nicht gegen die Live-UI mit Login getestet. Vor Live-Betrieb musst du sie verifizieren.
-
-### Selektoren live aktualisieren (Playwright Codegen)
-
+### Was tun bei "Listing failed (auth)"?
 ```bash
-# Für Vinted:
-npx playwright codegen https://www.vinted.de
-#  → im geöffneten Browser einloggen, zur Inbox gehen, einen Chat öffnen,
-#    Angebot anklicken etc. Playwright-Inspector zeigt rechts für jede
-#    Aktion den vorgeschlagenen Selektor an.
-#  → In selectors.ts als ersten Eintrag der Fallback-Kette einfügen.
-
-# Für Temu:
-npx playwright codegen https://www.temu.com
-#  → dto.
+npm run vinted:login
 ```
 
-Fallback-Strategie in den Selektor-Dateien: Komma-separierte Kette, `data-testid` zuerst, dann semantische Attribute, dann Text-Matcher. Playwright's `locator()` nimmt den ersten Treffer.
+### Was tun bei "Listing failed (dom)"?
+Vinted hat HTML geändert. Update `vinted-bot/src/listings/selectors.ts`:
+```bash
+npx playwright codegen https://www.vinted.de
+```
+
+### Was tun bei "CJ-Order seit 48h ohne Tracking"?
+- CJ-Dashboard öffnen, Order suchen, manuell prüfen
+- Häufig: out-of-stock, falsche Variant, oder Adresse abgelehnt
+- Fix manuell, dann `cj_orders.stuck_alerted_at` zurücksetzen damit Alert nicht wiederkommt
+
+### Daily-Cap erreicht?
+- Vinted: zu schnell. Warten bis 24h um, `vinted_daily_publish_cap` evtl. erhöhen wenn Account "warm" ist
+- CJ: Quota-Approval beantragen (siehe oben)
+- Re-List: zu viele Sales an einem Tag — Worker queued, am nächsten Tag weiter
+
+---
+
+## Tests
+
+```bash
+node scripts/test-cj-cooldown.mjs   # CJ-Poll-Cooldown-Logik
+node scripts/test-relister.mjs       # Re-Lister Detect/Stamp/Schedule
+```
 
 ---
 
 ## Ordnerstruktur
 
 ```
-Vinted-System/
-├── package.json            # npm workspaces root
-├── tsconfig.base.json
-├── .env.example
-├── shared/                 # @vinted-system/shared
-├── vinted-bot/             # @vinted-system/vinted-bot → :4701
-├── temu-bot/               # @vinted-system/temu-bot   → :4702
-├── orchestrator/           # @vinted-system/orchestrator → :4700
-└── dashboard/              # @vinted-system/dashboard  → :5173
+system/
+├── shared/                  # @vinted-system/shared (DB, Types, Logger, Locks)
+├── vinted-bot/   :4701      # Playwright-Bot
+├── cj-service/   :4720      # CJ API HTTP-Bridge
+├── orchestrator/ :4700      # Workers + Routes + SSE
+├── dashboard/    :5173      # React UI
+├── scripts/                 # cj-resolve-mappings, test-*, fal/nano image gen
+└── data/accounts/{id}/      # Vinted-Sessions pro Account
 ```
 
 ---
 
 ## Bekannte Einschränkungen
 
-- Kein Captcha-Solving: tritt ein Captcha auf, pausiert der Bot und alerted im Dashboard. Du musst manuell lösen.
-- Keine automatische Produkt-Suche auf Temu: Temu-URL + Variante werden pro Listing händisch gepflegt.
-- Ein Vinted-Account und ein Temu-Account pro Installation (kein Multi-Tenant).
-- Adress-Parser für Vinted-Käufer ist Best-Effort; exotische Formate können fehlen — dann Adresse im Sale-Datensatz manuell nachpflegen (JSON).
-- Rechtliche Pflichten (Impressum, Widerruf, Steuer) sind nicht Teil dieses Systems — extern regeln.
+- **Kein CAPTCHA-Solving**: Bot pausiert + alerted, du löst manuell.
+- **Ein Vinted-Account pro Installation** (Multi-Account nicht produktiv getestet).
+- **Adress-Parser** für Vinted-Käufer ist Best-Effort; exotische Formate müssen manuell als JSON in `sales.buyer_address` gepflegt werden.
+- **Rechtliche Pflichten** (Impressum, Widerruf, Steuer) sind nicht Teil dieses Systems — extern regeln.
+- **Vinted-Listings = 30/Tag** Soft-Cap. Höher → Account-Flag-Risiko.
