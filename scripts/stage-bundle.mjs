@@ -78,6 +78,10 @@ const EXCLUDE_FILES = new Set([
 ]);
 
 async function copyFiltered(src, dest, baseRelPath = '') {
+  // Top-level: ensure dest exists before any copy lands here. Subdirs get
+  // mkdir'd inside the loop. Without this the very first file copy fails
+  // because system/ doesn't exist yet.
+  await fsp.mkdir(dest, { recursive: true });
   const entries = await fsp.readdir(src, { withFileTypes: true });
   for (const e of entries) {
     if (e.name.startsWith('._')) continue;  // mac resource forks
