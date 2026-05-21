@@ -1,0 +1,24 @@
+# Railway deployment config for blackruby.de (marketing site + API in one service).
+#
+# Railway auto-detects nixpacks for Node projects. We use the explicit
+# `build`/`start` commands so the production marketing-site (`vite build`)
+# runs before the Node API serves it.
+#
+# To deploy:
+#   1. Push this repo to GitHub
+#   2. Railway dashboard → New Project → Deploy from GitHub repo
+#   3. Set "Root Directory" to `marketing` in the service settings
+#   4. Add a Volume mounted at `/app/marketing/data` (so SQLite persists)
+#   5. Set environment variables (see RAILWAY_DEPLOY.md)
+#   6. Add custom domain blackruby.de in Settings → Domains
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm install --no-audit --no-fund && npm run build:prod"
+
+[deploy]
+startCommand = "npm run start:prod"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30

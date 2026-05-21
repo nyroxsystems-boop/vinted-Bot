@@ -653,6 +653,24 @@ app.post('/api/license/refund', async (req: Request, res: Response) => {
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ ok: true, mock: MOCK_MODE }));
 
+// ── Static marketing-site (production single-service deploy) ────────────────
+// On Railway / any single-process host we serve the built marketing site
+// from the same Node process as the API. The Vite build outputs to
+// marketing/dist/. Locally during development the Vite dev-server (port
+// 5180) handles HMR; this static fallback only kicks in when dist/
+// exists, so it does NOT collide with the dev workflow.
+const SITE_DIST = resolve(__dirname, '../dist');
+if (existsSync(SITE_DIST)) {
+  console.log(`[marketing-api] serving static site from ${SITE_DIST}`);
+  app.use(express.static(SITE_DIST));
+  // SPA fallback — any non-/api/* path that isn't a real file falls back
+  // to index.html so React Router handles client-side routes.
+  app.get('*', (req: Request, res: Response, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(resolve(SITE_DIST, 'index.html'));
+  });
+}
+
 const PORT = Number(process.env.PORT ?? 5181);
 app.listen(PORT, () => {
   console.log(`[marketing-api] listening on :${PORT} ${MOCK_MODE ? '(MOCK MODE)' : ''}`);

@@ -1,0 +1,16 @@
+# Nixpacks config for Railway (and Coolify, etc.) — pins Node 24 to match
+# our development env. Without this Railway picks Node 20 which has a
+# different lockfile-version handling for the @vinted-system/* workspaces.
+
+[phases.setup]
+nixPkgs = ["nodejs_24", "python3", "gcc", "gnumake"]
+# python3 + gcc are needed by better-sqlite3's prebuild fallback.
+
+[phases.install]
+cmds = ["npm install --no-audit --no-fund --prefix /app/marketing"]
+
+[phases.build]
+cmds = ["cd /app/marketing && npm run build:prod"]
+
+[start]
+cmd = "cd /app/marketing && npm run start:prod"
