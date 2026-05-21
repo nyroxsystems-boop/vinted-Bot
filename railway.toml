@@ -1,0 +1,15 @@
+# Root-level Railway config — overrides any workspace-based auto-detection.
+# With this file Railway treats the WHOLE repo as a single Dockerfile-based
+# service. No more "create a service per npm workspace" suggestion.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node --import tsx api/server.ts"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+numReplicas = 1

@@ -1,0 +1,30 @@
+# Tells the docker-build context to skip everything that isn't marketing/.
+# Without this the Docker build pulls 1.6 GB of bot-workspaces + node_modules
+# + Playwright browser caches into the image and the build takes 20 min.
+
+# Everything is excluded by default…
+*
+
+# …except the marketing app and the absolute minimum the Dockerfile needs.
+!marketing/
+!marketing/**
+
+# Even within marketing, keep the docker image lean:
+marketing/node_modules
+marketing/dist
+marketing/data
+marketing/playwright-data
+marketing/_logs
+marketing/_diag
+
+# Common junk
+**/.DS_Store
+**/.env
+**/.env.local
+**/.env.*
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.log
+.git
+.github
