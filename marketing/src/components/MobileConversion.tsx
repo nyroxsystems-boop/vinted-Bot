@@ -15,7 +15,128 @@ import {
   Truck,
   ShieldCheck,
   Lock,
+  Zap,
+  Rocket,
+  Flame,
 } from 'lucide-react';
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MobileInlineCta — drop-in mid-page CTA so the user always has the next
+// "Lizenz holen" tap within reach. Multiple visual variants so repeating it
+// 3-4× through the page doesn't read like a single copy-pasted banner.
+// ──────────────────────────────────────────────────────────────────────────────
+export function MobileInlineCta({
+  variant = 'gradient',
+  headline,
+  sub,
+  cta = 'Lizenz holen',
+}: {
+  variant?: 'gradient' | 'solid' | 'split' | 'urgency';
+  headline: string;
+  sub?: string;
+  cta?: string;
+}) {
+  if (variant === 'split') {
+    return (
+      <section className="px-5 py-6 md:hidden">
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+          <div className="p-4">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-ruby-300">
+              <Flame size={12} /> Limited Beta
+            </div>
+            <div className="mt-1.5 text-[16px] font-bold leading-snug text-white">{headline}</div>
+            {sub && <p className="mt-1 text-[12px] leading-snug text-zinc-400">{sub}</p>}
+          </div>
+          <Link
+            to="/pricing"
+            className="flex w-full items-center justify-center gap-1.5 bg-gradient-to-r from-ruby-500 via-violet-500 to-indigo-500 px-4 py-3.5 text-[14px] font-bold text-white"
+          >
+            {cta} · 99 €/Monat
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (variant === 'urgency') {
+    return (
+      <section className="px-5 py-6 md:hidden">
+        <Link
+          to="/pricing"
+          className="relative block overflow-hidden rounded-2xl border border-ruby-500/30 bg-gradient-to-br from-ruby-500/15 via-violet-500/10 to-indigo-500/15 p-5"
+        >
+          <div className="absolute inset-0 bg-grid opacity-30" />
+          <div className="relative flex items-center gap-3">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-ruby-500 to-indigo-500 text-white shadow-xl shadow-ruby-500/40">
+              <Rocket size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-bold text-white">{headline}</div>
+              {sub && <p className="mt-0.5 text-[11px] text-zinc-400">{sub}</p>}
+            </div>
+            <ArrowRight size={16} className="shrink-0 text-ruby-300" />
+          </div>
+          <div className="relative mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-zinc-950/70 py-2 text-[12px] font-bold text-white backdrop-blur">
+            {cta} <ArrowRight size={13} />
+          </div>
+        </Link>
+      </section>
+    );
+  }
+
+  if (variant === 'solid') {
+    return (
+      <section className="px-5 py-6 md:hidden">
+        <Link
+          to="/pricing"
+          className="flex items-center justify-between gap-3 rounded-2xl bg-white px-5 py-4 text-zinc-950 shadow-xl shadow-black/30"
+        >
+          <div className="min-w-0">
+            <div className="text-[14px] font-bold leading-tight">{headline}</div>
+            {sub && <p className="mt-0.5 text-[11px] text-zinc-600">{sub}</p>}
+          </div>
+          <div className="flex shrink-0 items-center gap-1 rounded-xl bg-zinc-950 px-3 py-2 text-[12px] font-bold text-white">
+            {cta}
+            <ArrowRight size={13} />
+          </div>
+        </Link>
+      </section>
+    );
+  }
+
+  // gradient (default)
+  return (
+    <section className="px-5 py-6 md:hidden">
+      <Link
+        to="/pricing"
+        className="relative flex items-center justify-between gap-3 overflow-hidden rounded-2xl border border-white/10 px-5 py-4 backdrop-blur"
+      >
+        <span
+          className="absolute inset-0 -z-10"
+          style={{
+            background: 'linear-gradient(120deg, rgba(244,63,94,0.2), rgba(139,92,246,0.2), rgba(99,102,241,0.2))',
+            backgroundSize: '200% 200%',
+            animation: 'gradient-x 4s ease infinite',
+          }}
+        />
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-ruby-500 to-indigo-500 text-white">
+            <Zap size={16} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[14px] font-bold leading-tight text-white">{headline}</div>
+            {sub && <p className="mt-0.5 text-[11px] text-zinc-400">{sub}</p>}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-zinc-950">
+          {cta}
+          <ArrowRight size={13} />
+        </div>
+      </Link>
+    </section>
+  );
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // MobileStickyCta — always-on bottom bar with price + CTA.
@@ -27,10 +148,11 @@ export function MobileStickyCta() {
 
   useEffect(() => {
     function onScroll() {
-      const y = window.scrollY;
-      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-      // Show after passing the hero, hide when near the very bottom.
-      setShow(y > 400 && y < docHeight - 200);
+      // Show as soon as the user scrolls past the hero. Stay visible all
+      // the way to the bottom — losing the CTA right before the user hits
+      // the footer costs conversions on TikTok traffic that doesn't always
+      // scroll past the pricing section.
+      setShow(window.scrollY > 400);
     }
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });

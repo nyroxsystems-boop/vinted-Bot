@@ -239,7 +239,10 @@ export function ListingsShowcase() {
 // Aspect ratio 9:19.5 (iPhone 14/15 Pro). Innen wird beliebig befüllt.
 function IphoneMockup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative" style={{ width: 320 }}>
+    // Cap to viewport width minus padding on narrow phones so the
+    // mockup never forces horizontal scroll. On comfortable widths it
+    // stays at 320 px which is the iPhone 14/15 Pro aspect target.
+    <div className="relative w-[min(320px,calc(100vw-3rem))]">
       {/* Backlight glow */}
       <div className="absolute -inset-8 -z-10 rounded-[60px] bg-gradient-to-br from-ruby-500/20 via-violet-500/15 to-indigo-500/20 blur-3xl opacity-70" />
 

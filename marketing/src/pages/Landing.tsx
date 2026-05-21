@@ -17,7 +17,7 @@ import { PraxisCases } from '../components/PraxisCases';
 import { ListingsShowcase } from '../components/ListingsShowcase';
 import { FeatureShowcase } from '../components/FeatureShowcase';
 import { Reveal } from '../components/Reveal';
-import { MobileStickyCta, MobileProofStrip, MobileQuickPitch } from '../components/MobileConversion';
+import { MobileStickyCta, MobileProofStrip, MobileQuickPitch, MobileInlineCta } from '../components/MobileConversion';
 
 const MARKETPLACES = [
   'Vinted', 'Kleinanzeigen', 'eBay-DE', 'eBay-UK', 'Depop', 'Mercari',
@@ -67,12 +67,35 @@ export function LandingPage() {
       <Hero />
       <MobileQuickPitch />
       <ListingsShowcase />
+      <MobileInlineCta
+        variant="urgency"
+        headline="So sehen deine Listings aus."
+        sub="Foto rein, KI macht den Rest."
+        cta="Lizenz wählen"
+      />
       <MobileProofStrip />
       <LogoStrip />
       <Stats />
+      <MobileInlineCta
+        variant="gradient"
+        headline="200 €/Tag mit Vinted"
+        sub="Nach 2–4 Wochen Warmup realistisch"
+      />
       <ProfitCalculator />
       <PraxisCases />
+      <MobileInlineCta
+        variant="solid"
+        headline="Bereit für den ersten Sale?"
+        sub="Installation in 30 Sekunden"
+        cta="Jetzt starten"
+      />
       <FeatureShowcase />
+      <MobileInlineCta
+        variant="split"
+        headline="Alle 6 Module. Sofort startklar."
+        sub="Monatlich kündbar · 7 Tage Geld-zurück"
+        cta="Plan wählen"
+      />
       <HowItWorks />
       <PricingPreview />
       <FaqSection />
