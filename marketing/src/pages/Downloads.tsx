@@ -7,7 +7,7 @@ interface ReleaseAsset {
   name: string;
   url: string;
   size: string;
-  platform: 'mac-arm64' | 'mac-x64' | 'windows-x64';
+  platform: 'mac-arm64' | 'mac-x64' | 'windows-x64' | 'windows-x64-msi';
   sha256?: string;
 }
 
@@ -71,29 +71,34 @@ export function DownloadsPage() {
             </div>
           )}
 
-          <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-3">
+          {/* Two main cards — Apple Silicon Mac + Windows NSIS. Intel-Mac
+              cards used to live here but we don't ship an x86_64 DMG
+              (universal builds require per-arch stage-bundle, deferred). MSI
+              is listed as an "Alternative installer" link inside the
+              Windows card so IT-managed installs are still discoverable. */}
+          <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2">
             <PlatformCard
               icon={Apple}
-              title="macOS — Apple Silicon"
-              subtitle="M1, M2, M3, M4"
+              title="macOS"
+              subtitle="Apple Silicon · M1 / M2 / M3 / M4"
               asset={release?.assets.find((a) => a.platform === 'mac-arm64')}
-              fallbackVersion={release?.version}
-            />
-            <PlatformCard
-              icon={Apple}
-              title="macOS — Intel"
-              subtitle="x86_64, macOS 11+"
-              asset={release?.assets.find((a) => a.platform === 'mac-x64')}
               fallbackVersion={release?.version}
             />
             <PlatformCard
               icon={MonitorDown}
               title="Windows 10 / 11"
-              subtitle="64-bit, signiert"
+              subtitle="64-bit · Setup.exe"
               asset={release?.assets.find((a) => a.platform === 'windows-x64')}
               fallbackVersion={release?.version}
+              altAsset={release?.assets.find((a) => a.platform === 'windows-x64-msi')}
+              altLabel="MSI installer (für IT / Gruppenrichtlinien)"
             />
           </div>
+          {/* Tiny note for Intel Mac users so the absence isn't confusing. */}
+          <p className="mt-4 text-center text-xs text-zinc-500">
+            Intel Mac? Blackruby setzt aktuell auf Apple Silicon (M-Chip). Intel-Build folgt,
+            so lange nutz die Windows-Version in Parallels oder einen M-Mac.
+          </p>
 
           <FirstLaunchGuide />
 
@@ -149,12 +154,16 @@ function PlatformCard({
   subtitle,
   asset,
   fallbackVersion,
+  altAsset,
+  altLabel,
 }: {
   icon: typeof Apple;
   title: string;
   subtitle: string;
   asset?: ReleaseAsset;
   fallbackVersion?: string;
+  altAsset?: ReleaseAsset;
+  altLabel?: string;
 }) {
   return (
     <div className="card-glass transition hover:border-white/20">
@@ -181,6 +190,17 @@ function PlatformCard({
               <summary className="cursor-pointer hover:text-zinc-400">SHA-256</summary>
               <code className="mt-1 block break-all font-mono">{asset.sha256}</code>
             </details>
+          )}
+          {altAsset && (
+            <a
+              href={altAsset.url}
+              className="mt-3 flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-[11px] text-zinc-400 transition hover:border-white/10 hover:text-zinc-200"
+            >
+              <span className="flex items-center gap-1.5">
+                <Download size={11} /> {altLabel ?? 'Alternativer Installer'}
+              </span>
+              <span className="font-mono text-[10px] text-zinc-500">{altAsset.size}</span>
+            </a>
           )}
         </>
       ) : (
