@@ -836,6 +836,27 @@ app.post('/api/license/refund', async (req: Request, res: Response) => {
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ ok: true, mock: MOCK_MODE }));
 
+// POST /api/test/mail  body: { to, secret }  — fires sendLicenseEmail with a
+// dummy key so we can verify SMTP wiring end-to-end without going through
+// Stripe. Protected by the LICENSE_SIGNING_SECRET so randos can't spam our
+// outbound queue.
+app.post('/api/test/mail', async (req: Request, res: Response) => {
+  const { to, secret, tier = 'starter' } = req.body as { to?: string; secret?: string; tier?: 'starter' | 'hustler' };
+  if (secret !== LICENSE_SIGNING_SECRET) return res.status(401).json({ ok: false, error: 'bad_secret' });
+  if (!to) return res.status(400).json({ ok: false, error: 'missing_to' });
+  try {
+    await sendLicenseEmail({
+      to,
+      licenseKey: 'BRBY-TEST-XXXX-YYYY-ZZZZ-WWWW',
+      tier: tier === 'hustler' ? 'hustler' : 'starter',
+      amountEur: tier === 'hustler' ? 199 : 99,
+    });
+    res.json({ ok: true, sent_to: to });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 // ── Static marketing-site (production single-service deploy) ────────────────
 // On Railway / any single-process host we serve the built marketing site
 // from the same Node process as the API. The Vite build outputs to
