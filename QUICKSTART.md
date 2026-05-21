@@ -7,7 +7,7 @@ Willkommen. In 10 Minuten läuft dein Hustle auf Autopilot.
 ## 1. Installation
 
 ### Mac (Apple Silicon oder Intel)
-1. **`Blackruby.dmg` herunterladen** von [blackruby.app/downloads](https://blackruby.app/downloads)
+1. **`Blackruby.dmg` herunterladen** von [blackruby.de/downloads](https://blackruby.de/downloads)
 2. **Doppelklick** auf die DMG → ziehe Blackruby in den Programme-Ordner
 3. **Rechtsklick** auf Blackruby in Programme → **Öffnen** → noch einmal **Öffnen**
    (Nur beim ersten Start nötig — wir sind nicht über Apple signiert, aber die App ist 100 % sicher)
@@ -95,9 +95,9 @@ Stock kann beim CJ-Lieferanten leer sein. App markiert die Sale als „failed" �
 
 ## 7. Support
 
-- 📧 **support@blackruby.app**
+- 📧 **support@blackruby.de**
 - 💬 **Discord** (Lifetime-Tier nur): Link im Mitglieder-Bereich
-- 📖 **Mitglieder-Bereich**: [blackruby.app/members](https://blackruby.app/members) — Lizenz-Status, Account, Updates
+- 📖 **Mitglieder-Bereich**: [blackruby.de/members](https://blackruby.de/members) — Lizenz-Status, Account, Updates
 
 ---
 

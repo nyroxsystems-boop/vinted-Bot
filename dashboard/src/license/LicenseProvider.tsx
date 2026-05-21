@@ -19,7 +19,7 @@ import { LicenseGate } from './LicenseGate';
 import { verifyLicenseSignature } from './verify';
 
 const LICENSE_API_URL =
-  (import.meta.env.VITE_LICENSE_API_URL as string | undefined) ?? 'https://blackruby.app';
+  (import.meta.env.VITE_LICENSE_API_URL as string | undefined) ?? 'https://blackruby.de';
 const LS_KEY = 'br_license_v1';
 
 // Re-check the subscription every hour while the app is open. Cheap call,
@@ -29,7 +29,7 @@ const RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 // if expires_at is still in the future. Protects against the customer simply
 // staying offline forever to keep a cancelled subscription alive.
 // Raised from 72h to 96h to give a more generous buffer for short Stripe /
-// blackruby.app outages — short outages no longer kick paying users out.
+// blackruby.de outages — short outages no longer kick paying users out.
 const OFFLINE_GRACE_MS = 96 * 60 * 60 * 1000;
 // After this long offline we start surfacing a soft "license is being
 // re-checked" banner inside the app, but we still allow continued use until
@@ -225,7 +225,7 @@ async function revalidate(
       return { ok: false, error: 'Lizenz unbekannt — bitte prüfe den Key in der Kauf-E-Mail.', fatal: true };
     }
     if (r.status === 403) {
-      return { ok: false, error: 'Lizenz nicht aktiv (abgelaufen oder storniert). Verlängere unter blackruby.app/members.', fatal: true };
+      return { ok: false, error: 'Lizenz nicht aktiv (abgelaufen oder storniert). Verlängere unter blackruby.de/members.', fatal: true };
     }
     if (r.status === 429) {
       return { ok: false, error: 'Zu viele Validierungs-Versuche — bitte 5 Min warten.' };

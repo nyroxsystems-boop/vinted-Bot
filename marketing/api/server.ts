@@ -201,7 +201,7 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
 
   if (MOCK_MODE) {
     // Generate a license immediately and return a fake success URL.
-    const email = `demo+${Date.now()}@blackruby.app`;
+    const email = `demo+${Date.now()}@blackruby.de`;
     const lic = issueLicense({ email, tier, cadence: cad, stripeCustomer: null, stripeSub: null });
     const sessionId = `mock_${randomBytes(8).toString('hex')}`;
     db.prepare(
@@ -611,8 +611,8 @@ app.post('/api/license/refund', async (req: Request, res: Response) => {
     return res.status(410).json({
       ok: false,
       error: row.cadence === 'lifetime'
-        ? `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Wende dich an support@blackruby.app.`
-        : `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Abo kannst du jederzeit kündigen, aber bereits bezahlte Perioden werden nicht erstattet. Wende dich an support@blackruby.app.`,
+        ? `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Wende dich an support@blackruby.de.`
+        : `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Abo kannst du jederzeit kündigen, aber bereits bezahlte Perioden werden nicht erstattet. Wende dich an support@blackruby.de.`,
     });
   }
 

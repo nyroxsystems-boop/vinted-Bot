@@ -50,7 +50,7 @@ const EMBEDDED_PUBKEY: &str = match option_env!("BLACKRUBY_RELEASE_PUBKEY") {
 /// available to verify against. To flip to mandatory-signed-tarballs:
 /// bake BLACKRUBY_RELEASE_PUBKEY into the build via CI secret, then change
 /// this back to `!cfg!(debug_assertions)`. For now the threat model is
-/// "self-host" — user runs their own marketing-api or trusts blackruby.app,
+/// "self-host" — user runs their own marketing-api or trusts blackruby.de,
 /// not "untrusted manifest endpoint".
 fn require_signed() -> bool {
     !EMBEDDED_PUBKEY.is_empty()
@@ -143,7 +143,7 @@ pub fn apply_update(
         manifest.requires_native_reinstall || client_thinks_needs_reinstall(&current_for_check, &version);
     if needs_reinstall {
         return Err(
-            "Dieses Update enthält Änderungen am App-Kern — bitte den neuen Installer von blackruby.app/members herunterladen."
+            "Dieses Update enthält Änderungen am App-Kern — bitte den neuen Installer von blackruby.de/members herunterladen."
                 .to_string(),
         );
     }
@@ -410,6 +410,6 @@ pub fn version_info(repo_root: &Path) -> VersionInfo {
     VersionInfo {
         version: read_current_version(repo_root).unwrap_or_else(|_| "0.0.0".to_string()),
         manifest_url: std::env::var("BLACKRUBY_MANIFEST_URL")
-            .unwrap_or_else(|_| "https://blackruby.app".to_string()),
+            .unwrap_or_else(|_| "https://blackruby.de".to_string()),
     }
 }

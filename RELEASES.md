@@ -36,11 +36,11 @@ MÜSSEN die Variable gesetzt haben.**
 
 ### 3. Manifest-Server konfigurieren
 
-Standard: App fragt `https://blackruby.app/api/releases/tarball/<current>`.
+Standard: App fragt `https://blackruby.de/api/releases/tarball/<current>`.
 
 Override per Customer (z.B. Staging-Channel):
 ```bash
-export BLACKRUBY_MANIFEST_URL=https://staging.blackruby.app
+export BLACKRUBY_MANIFEST_URL=https://staging.blackruby.de
 ```
 
 ---
@@ -66,12 +66,12 @@ RELEASE_SIGNING_KEY=$(cat ~/.blackruby/signing.key) \
 #   dist/release/0.5.1/system.tar.gz.sig
 #   marketing/data/releases.json           (manifest aktualisiert)
 
-# 5. Upload zu blackruby.app
-rsync -avz dist/release/0.5.1/ blackruby.app:/srv/dist/release/0.5.1/
-rsync -avz marketing/data/releases.json blackruby.app:/srv/marketing/data/
+# 5. Upload zu blackruby.de
+rsync -avz dist/release/0.5.1/ blackruby.de:/srv/dist/release/0.5.1/
+rsync -avz marketing/data/releases.json blackruby.de:/srv/marketing/data/
 
 # 6. Marketing-API neu starten (oder watcht das File-System sowieso)
-ssh blackruby.app 'systemctl restart blackruby-marketing'
+ssh blackruby.de 'systemctl restart blackruby-marketing'
 ```
 
 Sobald `releases.json` neu ist:

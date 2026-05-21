@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Update Checker — replaces the (disabled) Tauri auto-updater.
 //
-// Polls blackruby.app/api/releases/latest once per day. If the latest version
+// Polls blackruby.de/api/releases/latest once per day. If the latest version
 // differs from APP_VERSION, surfaces a toast that links to the download page
 // instead of doing an in-app silent update. Honest + works without code-signing.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -17,19 +17,19 @@ const SKIP_VERSION_KEY = 'br_update_skip_version';
 // Defence-in-depth: even though VITE_LICENSE_API_URL is set at build time,
 // keep an explicit whitelist so a tampered/typo'd env can't point the update
 // fetch at a random host. Anything off-list falls back to the canonical URL.
-const ALLOWED_HOSTS = ['blackruby.app', 'staging.blackruby.app', 'localhost', '127.0.0.1'];
+const ALLOWED_HOSTS = ['blackruby.de', 'staging.blackruby.de', 'localhost', '127.0.0.1'];
 
 function safeApiUrl(): string {
-  const raw = (import.meta.env.VITE_LICENSE_API_URL as string | undefined) ?? 'https://blackruby.app';
+  const raw = (import.meta.env.VITE_LICENSE_API_URL as string | undefined) ?? 'https://blackruby.de';
   try {
     const u = new URL(raw);
     if (!ALLOWED_HOSTS.includes(u.hostname)) {
       console.error('[UpdateChecker] disallowed VITE_LICENSE_API_URL host:', u.hostname);
-      return 'https://blackruby.app';
+      return 'https://blackruby.de';
     }
     return raw;
   } catch {
-    return 'https://blackruby.app';
+    return 'https://blackruby.de';
   }
 }
 

@@ -42,11 +42,11 @@ STRIPE_PRICE_HUSTLER_MONTHLY=price_xxx
 STRIPE_PRICE_HUSTLER_YEARLY=price_xxx
 STRIPE_PRICE_LIFETIME=price_xxx
 LICENSE_SIGNING_SECRET=$(openssl rand -hex 32)
-PUBLIC_URL=https://blackruby.app
+PUBLIC_URL=https://blackruby.de
 ```
 
 Configure the webhook endpoint in Stripe to point at
-`https://blackruby.app/api/stripe/webhook` and subscribe to:
+`https://blackruby.de/api/stripe/webhook` and subscribe to:
 
 - `checkout.session.completed`
 - `customer.subscription.deleted`
@@ -76,7 +76,7 @@ Required toolchains:
 
 ### 4. Auto-Updates
 `tauri.conf.json → plugins.updater.endpoints` points at
-`https://blackruby.app/api/releases/{{target}}/{{current_version}}`. Generate
+`https://blackruby.de/api/releases/{{target}}/{{current_version}}`. Generate
 an Ed25519 signing keypair with `tauri signer generate` and set the public key
 in the `pubkey` field; sign each release artifact with the private key.
 
@@ -102,6 +102,6 @@ output (`marketing/dist`) to any static host (Vercel, Netlify, Cloudflare Pages,
 The API (`api/server.ts`) is a single Node/Express process — run it as a systemd unit or
 behind PM2 on the same host that serves the static site (reverse-proxy `/api/*` to port 5181).
 
-Installer downloads should be served from `https://blackruby.app/downloads/<version>/<file>`.
+Installer downloads should be served from `https://blackruby.de/downloads/<version>/<file>`.
 Either upload to your CDN before each release or proxy `/downloads/*` to a private S3 bucket
 with signed URLs.

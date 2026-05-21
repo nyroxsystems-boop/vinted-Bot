@@ -133,7 +133,7 @@ export function UpdatesPanel() {
             Update-Server
           </div>
           <div className="mt-1 truncate font-mono text-xs text-zinc-300">
-            {version?.manifest_url ?? 'https://blackruby.app'}
+            {version?.manifest_url ?? 'https://blackruby.de'}
           </div>
         </div>
       </div>
@@ -208,7 +208,7 @@ export function UpdatesPanel() {
             )}
             {manifest.requires_native_reinstall && (
               <a
-                href="https://blackruby.app/members"
+                href="https://blackruby.de/members"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-500/20"

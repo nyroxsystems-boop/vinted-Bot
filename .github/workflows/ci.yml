@@ -97,7 +97,7 @@ jobs:
         # validate endpoint to talk to. We ship with VITE_BYPASS_LICENSE=true
         # so the app is usable.
         #
-        # PHASE 2 (when blackruby.app + Stripe go live): remove the env block
+        # PHASE 2 (when blackruby.de + Stripe go live): remove the env block
         # below, add LICENSE_VERIFY_KEY + LICENSE_API_URL to GH Repo Secrets,
         # tag a new release. Customer builds will then enforce license-keys.
         env:
@@ -156,7 +156,7 @@ jobs:
         # validate endpoint to talk to. We ship with VITE_BYPASS_LICENSE=true
         # so the app is usable.
         #
-        # PHASE 2 (when blackruby.app + Stripe go live): remove the env block
+        # PHASE 2 (when blackruby.de + Stripe go live): remove the env block
         # below, add LICENSE_VERIFY_KEY + LICENSE_API_URL to GH Repo Secrets,
         # tag a new release. Customer builds will then enforce license-keys.
         env:

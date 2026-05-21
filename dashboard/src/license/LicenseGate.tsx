@@ -52,12 +52,12 @@ export function LicenseGate({ onActivate, previousKey, reason }: Props) {
               <span>
                 Deine Lizenz ist abgelaufen. Verlängere sie unter{' '}
                 <a
-                  href="https://blackruby.app/members"
+                  href="https://blackruby.de/members"
                   target="_blank"
                   rel="noreferrer"
                   className="underline hover:text-amber-100"
                 >
-                  blackruby.app/members
+                  blackruby.de/members
                 </a>{' '}
                 und gib den neuen Key hier ein.
               </span>
@@ -112,10 +112,10 @@ export function LicenseGate({ onActivate, previousKey, reason }: Props) {
 
           <div className="mt-6 flex flex-col items-center gap-2 border-t border-white/5 pt-5 text-xs text-zinc-500">
             <span className="flex items-center gap-1.5">
-              <ShieldCheck size={12} className="text-rose-400" /> Validierung über blackruby.app — funktioniert offline nach 1. Aktivierung
+              <ShieldCheck size={12} className="text-rose-400" /> Validierung über blackruby.de — funktioniert offline nach 1. Aktivierung
             </span>
             <a
-              href="https://blackruby.app/members"
+              href="https://blackruby.de/members"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 hover:text-zinc-300"
@@ -128,12 +128,12 @@ export function LicenseGate({ onActivate, previousKey, reason }: Props) {
         <p className="mt-4 text-center text-xs text-zinc-600">
           Noch keine Lizenz?{' '}
           <a
-            href="https://blackruby.app/pricing"
+            href="https://blackruby.de/pricing"
             target="_blank"
             rel="noreferrer"
             className="font-semibold text-zinc-400 hover:text-white"
           >
-            blackruby.app/pricing
+            blackruby.de/pricing
           </a>
         </p>
       </div>

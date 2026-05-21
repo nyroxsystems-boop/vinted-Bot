@@ -72,7 +72,7 @@ export function LicensePanel() {
 
       <div className="flex flex-wrap items-center gap-3 border-t border-zinc-800 pt-4 text-sm">
         <a
-          href="https://blackruby.app/members"
+          href="https://blackruby.de/members"
           target="_blank"
           rel="noreferrer"
           className="btn-ghost"

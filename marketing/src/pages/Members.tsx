@@ -195,7 +195,7 @@ export function MembersPage() {
                   <Download size={15} /> Zur Download-Seite
                 </a>
                 <a
-                  href="mailto:support@blackruby.app"
+                  href="mailto:support@blackruby.de"
                   className="btn-link ml-4"
                 >
                   Support kontaktieren <ExternalLink size={12} />

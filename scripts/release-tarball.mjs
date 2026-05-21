@@ -3,7 +3,7 @@
 // Release-tarball builder.
 //
 // Packs the in-app-updatable parts of the repo into a single signed tarball
-// that the Tauri shell can pull from blackruby.app and apply at runtime.
+// that the Tauri shell can pull from blackruby.de and apply at runtime.
 //
 //   • Bumps `app/package.json` version (or reads --version)
 //   • Tars: shared/ orchestrator/ vinted-bot/ kleinanzeigen-bot/ depop-bot/
@@ -33,7 +33,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const RELEASE_DIR_BASE = resolve(REPO_ROOT, 'dist', 'release');
 const RELEASES_JSON = resolve(REPO_ROOT, 'marketing', 'data', 'releases.json');
-const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://blackruby.app';
+const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://blackruby.de';
 
 // Refuse to build an unsigned release. The Rust updater in release-mode
 // rejects unsigned tarballs anyway, so a release without a signing key

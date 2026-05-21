@@ -86,7 +86,7 @@ const DOCS: Record<string, { title: string; body: JSX.Element }> = {
     body: (
       <>
         <h2>Verantwortlicher</h2>
-        <p>Blackruby Systems · support@blackruby.app</p>
+        <p>Blackruby Systems · support@blackruby.de</p>
         <h2>Erhobene Daten</h2>
         <p>
           Beim Kauf erheben wir nur die für die Vertragsabwicklung notwendigen Daten: E-Mail,
@@ -142,7 +142,7 @@ const DOCS: Record<string, { title: string; body: JSX.Element }> = {
         <h2>Deine Rechte</h2>
         <p>
           Du hast jederzeit das Recht auf Auskunft, Berichtigung und Löschung deiner Daten. Anfragen
-          an support@blackruby.app.
+          an support@blackruby.de.
         </p>
       </>
     ),
@@ -169,7 +169,7 @@ const DOCS: Record<string, { title: string; body: JSX.Element }> = {
           </p>
         )}
         <p>
-          Kontakt: {import.meta.env.VITE_IMPRESSUM_EMAIL ?? 'support@blackruby.app'}
+          Kontakt: {import.meta.env.VITE_IMPRESSUM_EMAIL ?? 'support@blackruby.de'}
         </p>
         <p className="text-zinc-500">
           Inhaltlich Verantwortlicher gemäß § 18 Abs. 2 MStV:{' '}

@@ -153,13 +153,13 @@ export function UpdateBanner() {
             <div className="min-w-0">
               <span className="font-bold">Großes Update: v{manifest.version}</span>
               <span className="ml-1 text-amber-200/85">
-                Enthält App-Kern-Änderungen — bitte neuen Installer von blackruby.app laden.
+                Enthält App-Kern-Änderungen — bitte neuen Installer von blackruby.de laden.
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <a
-              href="https://blackruby.app/members"
+              href="https://blackruby.de/members"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded border border-amber-500/40 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/10"

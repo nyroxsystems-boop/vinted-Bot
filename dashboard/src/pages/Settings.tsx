@@ -411,8 +411,8 @@ export function SettingsPage() {
           <HelpCard
             title="Support"
             body={[
-              'Mitglieder-Bereich: blackruby.app/members',
-              'E-Mail: support@blackruby.app',
+              'Mitglieder-Bereich: blackruby.de/members',
+              'E-Mail: support@blackruby.de',
               'Auto-Update prüft täglich auf neue Versionen.',
               'Backup: Daten/SQLite unter data/.',
             ]}

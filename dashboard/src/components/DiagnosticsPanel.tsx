@@ -106,7 +106,7 @@ export function DiagnosticsPanel() {
 
       <p className="text-xs text-zinc-500">
         Wenn etwas nicht funktioniert: klicke „Diagnose-Bundle exportieren" und schicke die
-        Datei an <a href="mailto:support@blackruby.app" className="text-rose-300 hover:underline">support@blackruby.app</a>.
+        Datei an <a href="mailto:support@blackruby.de" className="text-rose-300 hover:underline">support@blackruby.de</a>.
         Die ZIP enthält die letzten Logs, App-Version, DB-Größe — keine Käufer-/Listing-Daten.
       </p>
 
@@ -132,7 +132,7 @@ export function DiagnosticsPanel() {
           {copied ? <Check size={13} className="text-rose-400" /> : <Clipboard size={13} />}
           {copied ? 'Kopiert' : 'System-Info kopieren'}
         </button>
-        <a href="mailto:support@blackruby.app" className="btn-ghost text-xs">
+        <a href="mailto:support@blackruby.de" className="btn-ghost text-xs">
           <FileText size={13} /> Support kontaktieren
         </a>
         {tauri.available() && (
@@ -179,7 +179,7 @@ export function DiagnosticsPanel() {
               }}
               disabled={busy !== null}
               className="btn-ghost text-xs"
-              title="Manueller Check gegen blackruby.app/api/releases"
+              title="Manueller Check gegen blackruby.de/api/releases"
             >
               <ArrowUpCircle size={13} />
               {busy === 'check-update' ? 'Prüfe…' : 'Auf Updates prüfen'}
