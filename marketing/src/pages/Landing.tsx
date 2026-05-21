@@ -14,6 +14,7 @@ import { Nav } from '../components/Nav';
 import { Footer } from '../components/Footer';
 import { ProfitCalculator } from '../components/ProfitCalculator';
 import { PraxisCases } from '../components/PraxisCases';
+import { ListingsShowcase } from '../components/ListingsShowcase';
 import { FeatureShowcase } from '../components/FeatureShowcase';
 import { Reveal } from '../components/Reveal';
 
@@ -63,6 +64,7 @@ export function LandingPage() {
     <div className="min-h-screen">
       <Nav />
       <Hero />
+      <ListingsShowcase />
       <LogoStrip />
       <Stats />
       <ProfitCalculator />
@@ -143,7 +145,8 @@ function Hero() {
   );
 }
 
-// HeroVisual — abstract orbit + live KPI ticker. No screenshot, fully rendered.
+// HeroVisual — layered dashboard window with floating live-event cards around it.
+// No screenshot — everything rendered live so the page stays sharp at any DPI.
 function HeroVisual() {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -151,95 +154,206 @@ function HeroVisual() {
     return () => clearInterval(id);
   }, []);
 
-  // KPIs that count up convincingly without ever resetting visually
-  const sales   = 12 + Math.floor(tick / 8) % 18;
-  const listings= 84 + Math.floor(tick / 3) % 60;
-  const revenue = 1240 + Math.floor(tick * 1.5) % 980;
+  const sales    = 12 + Math.floor(tick / 8) % 18;
+  const listings = 84 + Math.floor(tick / 3) % 60;
+  const revenue  = 1240 + Math.floor(tick * 1.5) % 980;
+  const today    = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  // Chart data — deterministic from tick so it animates without jumping
+  const bars = Array.from({ length: 7 }, (_, i) => {
+    const h = 35 + Math.abs(Math.sin((tick + i * 7) * 0.2)) * 50 + ((tick + i * 3) % 11) * 1.5;
+    return h;
+  });
 
   return (
     <div className="relative">
+      {/* Backdrop glow */}
       <div className="absolute inset-0 -m-2 rounded-3xl bg-gradient-to-br from-ruby-500/30 via-violet-500/20 to-indigo-500/30 blur-2xl opacity-60" />
-      <div className="ring-glow relative aspect-[16/9] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/85 backdrop-blur">
+
+      {/* Main dashboard window — slight tilt for depth */}
+      <div
+        className="ring-glow relative aspect-[16/9.2] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/85 backdrop-blur"
+        style={{ transform: 'perspective(1800px) rotateX(2deg)' }}
+      >
         <div className="absolute inset-0 bg-grid opacity-40" />
 
-        {/* Orbital marketplaces */}
-        <svg viewBox="0 0 100 56" className="absolute inset-0 h-full w-full">
-          <defs>
-            <radialGradient id="hero-glow" cx="50%" cy="50%" r="40%">
-              <stop offset="0%"   stopColor="#fb7185" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#fb7185" stopOpacity="0" />
-            </radialGradient>
-            <linearGradient id="hero-center" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%"   stopColor="#fb7185" />
-              <stop offset="60%"  stopColor="#a78bfa" />
-              <stop offset="100%" stopColor="#6366f1" />
-            </linearGradient>
-          </defs>
-          <circle cx="50" cy="28" r="20" fill="url(#hero-glow)" />
-          <circle cx="50" cy="28" r="14" stroke="rgba(255,255,255,0.08)" strokeWidth="0.18" fill="none" />
-          <circle cx="50" cy="28" r="22" stroke="rgba(255,255,255,0.05)" strokeWidth="0.18" fill="none" />
-
-          {/* Center "Blackruby" core */}
-          <rect x="46" y="24" width="8" height="8" rx="1.5" fill="url(#hero-center)" />
-
-          {/* Orbital nodes */}
-          {MARKETPLACES.slice(0, 14).map((m, i) => {
-            const ring = i < 7 ? 14 : 22;
-            const inRing = i < 7 ? i : i - 7;
-            const count = i < 7 ? 7 : 7;
-            const offset = (tick * 0.005) * (i < 7 ? 1 : -1);
-            const angle = (inRing / count) * Math.PI * 2 - Math.PI / 2 + offset;
-            const x = 50 + Math.cos(angle) * ring;
-            const y = 28 + Math.sin(angle) * ring;
-            const lit = (Math.floor(tick / 5) + i) % MARKETPLACES.length === i;
-            return (
-              <g key={m}>
-                {lit && (
-                  <line
-                    x1="50" y1="28" x2={x} y2={y}
-                    stroke="#fb7185"
-                    strokeWidth="0.18"
-                    opacity="0.6"
-                  />
-                )}
-                <circle
-                  cx={x} cy={y}
-                  r={lit ? '1.3' : '0.9'}
-                  fill={lit ? '#fb7185' : 'rgba(255,255,255,0.25)'}
-                  style={{ transition: 'all 250ms ease-out' }}
-                />
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* KPI ticker bar */}
-        <div className="absolute inset-x-0 bottom-0 flex items-center justify-around gap-4 border-t border-white/5 bg-zinc-950/85 px-6 py-4 backdrop-blur">
-          <TickerKpi label="Live-Listings" value={listings.toString()} tone="ruby" />
-          <TickerKpi label="Sales heute" value={sales.toString()} tone="violet" />
-          <TickerKpi label="Umsatz heute" value={`${revenue.toLocaleString('de-DE')} €`} tone="indigo" />
-          <div className="hidden md:flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Autopilot
+        {/* Window title bar */}
+        <div className="relative flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
+              <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
+              <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
+            </div>
+            <span className="ml-3 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+              <span className="h-2 w-2 rounded-sm bg-gradient-to-br from-ruby-500 to-indigo-500" />
+              blackruby · home
+            </span>
           </div>
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-emerald-300">
+            <span className="mr-1 inline-block h-1.5 w-1.5 translate-y-[-1px] rounded-full bg-emerald-400 animate-pulse" />
+            autopilot · live
+          </span>
         </div>
 
-        {/* Top-left brand tag */}
-        <div className="absolute left-4 top-4 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-          <span className="h-2 w-2 rounded-sm bg-gradient-to-br from-ruby-500 to-indigo-500" />
-          blackruby · hustle engine
+        <div className="relative grid h-[calc(100%-2.5rem)] grid-cols-12 gap-0">
+          {/* Sidebar */}
+          <aside className="col-span-3 border-r border-white/5 bg-white/[0.02] p-4">
+            <div className="space-y-1">
+              {[
+                { l: 'Home',         active: true  },
+                { l: 'Pipeline',     active: false },
+                { l: 'Listings',     active: false },
+                { l: 'Sales',        active: false },
+                { l: 'Chats',        active: false },
+                { l: 'Studio',       active: false },
+                { l: 'Settings',     active: false },
+              ].map((s) => (
+                <div
+                  key={s.l}
+                  className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] transition ${
+                    s.active ? 'bg-ruby-500/15 text-white' : 'text-zinc-500'
+                  }`}
+                >
+                  {s.active && <span className="h-1 w-1 rounded-full bg-ruby-400" />}
+                  <span>{s.l}</span>
+                </div>
+              ))}
+            </div>
+          </aside>
+
+          {/* Main area */}
+          <main className="col-span-9 p-4">
+            {/* KPI row */}
+            <div className="grid grid-cols-3 gap-2">
+              <KpiCard label="Live-Listings" value={listings.toString()} tone="ruby" delta="+12" />
+              <KpiCard label="Sales heute"   value={sales.toString()}    tone="violet" delta="+3" />
+              <KpiCard label="Umsatz heute"  value={`${revenue.toLocaleString('de-DE')} €`} tone="indigo" delta="+184 €" />
+            </div>
+
+            {/* Chart card */}
+            <div className="mt-3 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+              <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-zinc-500">
+                <span>Diese Woche · Sales / Tag</span>
+                <span className="text-emerald-300">▲ 24 % vs. last week</span>
+              </div>
+              <div className="mt-3 flex h-14 items-end justify-around gap-2">
+                {bars.map((h, i) => (
+                  <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                    <div
+                      className="w-full rounded-t transition-all duration-300"
+                      style={{
+                        height: `${h}%`,
+                        background: i === 6
+                          ? 'linear-gradient(180deg, #fb7185, #6366f1)'
+                          : 'linear-gradient(180deg, rgba(244,63,94,0.5), rgba(99,102,241,0.3))',
+                      }}
+                    />
+                    <span className="text-[8px] text-zinc-500">{today[i]}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Listing strip */}
+            <div className="mt-3 grid grid-cols-4 gap-2">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="aspect-[3/4] overflow-hidden rounded-md border border-white/5 bg-gradient-to-br from-ruby-500/25 via-violet-500/15 to-indigo-500/25">
+                  <svg viewBox="0 0 60 80" className="h-full w-full opacity-60">
+                    <ellipse cx="30" cy="22" rx="7" ry="7" fill="rgba(255,255,255,0.55)" />
+                    <path d="M 12 80 Q 12 45 30 42 Q 48 45 48 80 Z" fill="rgba(255,255,255,0.45)" />
+                  </svg>
+                </div>
+              ))}
+            </div>
+          </main>
         </div>
+      </div>
+
+      {/* Floating event cards around the dashboard */}
+      <FloatingEvent
+        className="left-[-2%] top-[18%] hidden md:flex"
+        delay={0}
+        icon="sale"
+        title="Sale · Vinted"
+        subtitle="Cropped Cardigan · 27,90 €"
+      />
+      <FloatingEvent
+        className="right-[-3%] top-[8%] hidden md:flex"
+        delay={1800}
+        icon="publish"
+        title="Listing live"
+        subtitle="3 Marktplätze · 0,82 s"
+      />
+      <FloatingEvent
+        className="right-[-2%] bottom-[18%] hidden md:flex"
+        delay={3600}
+        icon="captcha"
+        title="CAPTCHA solved"
+        subtitle="whisper.cpp · 0,62 s"
+      />
+      <FloatingEvent
+        className="left-[-3%] bottom-[10%] hidden md:flex"
+        delay={5400}
+        icon="cj"
+        title="CJ-Order fired"
+        subtitle="YT2521421266234876"
+      />
+    </div>
+  );
+}
+
+function KpiCard({ label, value, tone, delta }: { label: string; value: string; tone: 'ruby' | 'violet' | 'indigo'; delta: string }) {
+  const cls = tone === 'ruby' ? 'text-ruby-300' : tone === 'violet' ? 'text-violet-300' : 'text-indigo-300';
+  return (
+    <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2.5">
+      <div className="text-[9px] uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-0.5 flex items-baseline gap-2">
+        <span className={`font-mono text-lg font-bold tabular-nums ${cls}`}>{value}</span>
+        <span className="font-mono text-[9px] text-emerald-300">{delta}</span>
       </div>
     </div>
   );
 }
 
-function TickerKpi({ label, value, tone }: { label: string; value: string; tone: 'ruby' | 'violet' | 'indigo' }) {
-  const cls = tone === 'ruby' ? 'text-ruby-300' : tone === 'violet' ? 'text-violet-300' : 'text-indigo-300';
+// Floating event card — fades + drifts in a slow loop, staggered per card.
+function FloatingEvent({
+  className = '',
+  delay = 0,
+  icon,
+  title,
+  subtitle,
+}: {
+  className?: string;
+  delay?: number;
+  icon: 'sale' | 'publish' | 'captcha' | 'cj';
+  title: string;
+  subtitle: string;
+}) {
+  const ICONS = {
+    sale:    { bg: 'from-ruby-500/40 to-ruby-500/10',    ring: 'ring-ruby-500/30',   dot: 'bg-ruby-400',     emoji: '€'  },
+    publish: { bg: 'from-violet-500/40 to-violet-500/10', ring: 'ring-violet-500/30', dot: 'bg-violet-400',   emoji: '↗'  },
+    captcha: { bg: 'from-emerald-500/40 to-emerald-500/10', ring: 'ring-emerald-500/30', dot: 'bg-emerald-400', emoji: '✓' },
+    cj:      { bg: 'from-indigo-500/40 to-indigo-500/10', ring: 'ring-indigo-500/30', dot: 'bg-indigo-400',   emoji: '→'  },
+  } as const;
+  const c = ICONS[icon];
   return (
-    <div className="flex flex-col items-start">
-      <div className="text-[9px] uppercase tracking-wider text-zinc-500">{label}</div>
-      <div className={`font-mono text-lg font-bold tabular-nums ${cls}`}>{value}</div>
+    <div
+      className={`absolute z-10 flex items-center gap-2.5 rounded-xl border border-white/10 bg-zinc-950/85 px-3 py-2 shadow-2xl shadow-black/40 backdrop-blur-md ring-1 ${c.ring} ${className}`}
+      style={{
+        animation: 'float 6s ease-in-out infinite',
+        animationDelay: `${delay}ms`,
+      }}
+    >
+      <span className={`grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br ${c.bg} font-mono text-base font-bold text-white`}>
+        {c.emoji}
+      </span>
+      <div className="text-left">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-white">
+          <span className={`h-1.5 w-1.5 rounded-full ${c.dot} animate-pulse`} />
+          {title}
+        </div>
+        <div className="font-mono text-[9px] text-zinc-400">{subtitle}</div>
+      </div>
     </div>
   );
 }
