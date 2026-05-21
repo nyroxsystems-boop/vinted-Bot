@@ -49,14 +49,21 @@ async function send(to: string, subject: string, html: string, text?: string) {
 
   // Path 1: Resend (recommended for production)
   if (RESEND_API_KEY) {
+    // First try with the branded sender (e.g. info@blackruby.de). If Resend
+    // rejects with "domain not verified" — common during the gap between
+    // adding DNS records and Resend's eu-west-1 DNS cache picking them up —
+    // automatically retry with their sandbox sender so the customer still
+    // gets the mail. We log a loud warning so this never becomes invisible.
+    const FALLBACK_FROM = 'Blackruby <onboarding@resend.dev>';
+    const attempt = async (from: string) =>
+      resendClient().emails.send({ from, to: [to], subject, html, text: plain });
+
     try {
-      const r = await resendClient().emails.send({
-        from: MAIL_FROM,
-        to: [to],
-        subject,
-        html,
-        text: plain,
-      });
+      let r = await attempt(MAIL_FROM);
+      if (r.error && /not verified/i.test(r.error.message ?? '') && MAIL_FROM !== FALLBACK_FROM) {
+        console.warn(`[mail/resend] domain not verified — retrying with ${FALLBACK_FROM}`);
+        r = await attempt(FALLBACK_FROM);
+      }
       if (r.error) throw new Error(`resend: ${r.error.name} — ${r.error.message}`);
       console.log(`[mail/resend] sent "${subject}" → ${to} · id=${r.data?.id}`);
       return;
