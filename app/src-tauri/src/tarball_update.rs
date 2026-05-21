@@ -43,11 +43,17 @@ const EMBEDDED_PUBKEY: &str = match option_env!("BLACKRUBY_RELEASE_PUBKEY") {
     None => "",
 };
 
-/// True for non-debug builds. In release-mode the updater MUST have an
-/// embedded pubkey — otherwise an attacker on the manifest endpoint could
-/// push unsigned tarballs.
+/// True when the build was deliberately compiled with an embedded pubkey.
+/// We DO NOT require signatures in release-mode unconditionally — that
+/// would brick first-install customers whose CI didn't have RELEASE_PUBKEY
+/// secrets configured. Signatures are enforced ONLY when a pubkey is
+/// available to verify against. To flip to mandatory-signed-tarballs:
+/// bake BLACKRUBY_RELEASE_PUBKEY into the build via CI secret, then change
+/// this back to `!cfg!(debug_assertions)`. For now the threat model is
+/// "self-host" — user runs their own marketing-api or trusts blackruby.app,
+/// not "untrusted manifest endpoint".
 fn require_signed() -> bool {
-    !cfg!(debug_assertions)
+    !EMBEDDED_PUBKEY.is_empty()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

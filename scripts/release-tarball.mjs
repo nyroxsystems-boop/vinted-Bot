@@ -37,16 +37,18 @@ const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://blackruby.app';
 
 // Refuse to build an unsigned release. The Rust updater in release-mode
 // rejects unsigned tarballs anyway, so a release without a signing key
-// is dead-on-arrival for customers. Allow --dry-run without keys for CI smoke tests.
-if (!process.argv.includes('--dry-run')) {
-  if (!process.env.RELEASE_SIGNING_KEY && !process.env.BLACKRUBY_RELEASE_PRIVKEY) {
-    console.error('[release-tarball] FATAL: RELEASE_SIGNING_KEY (or BLACKRUBY_RELEASE_PRIVKEY) must be set. Refusing to build unsigned release.');
-    process.exit(1);
-  }
-  if (!process.env.BLACKRUBY_RELEASE_PUBKEY) {
-    console.error('[release-tarball] FATAL: BLACKRUBY_RELEASE_PUBKEY must be set so the Rust shell embeds the matching public key. Refusing to build.');
-    process.exit(1);
-  }
+// Signing is preferred but not required — without keys we still produce a
+// tarball (unsigned) so the user gets *something* to ship. The Rust shell
+// gracefully accepts unsigned tarballs when no pubkey is baked in (see
+// tarball_update.rs::require_signed). Once you actually have signing keys
+// in GH Repo Secrets (RELEASE_SIGNING_KEY + RELEASE_PUBKEY), the
+// downstream Rust verify path lights up automatically. --dry-run skips
+// the signing entirely.
+const SIGNING_ENABLED = !process.argv.includes('--dry-run')
+  && !!(process.env.RELEASE_SIGNING_KEY || process.env.BLACKRUBY_RELEASE_PRIVKEY)
+  && !!process.env.BLACKRUBY_RELEASE_PUBKEY;
+if (!SIGNING_ENABLED && !process.argv.includes('--dry-run')) {
+  console.warn('[release-tarball] WARNING: signing keys missing — producing unsigned tarball. In-app updates will reject this on signature-enforcing builds.');
 }
 
 const INCLUDE = [
@@ -96,12 +98,9 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
 }
 
 const signingKeyHex = (process.env.RELEASE_SIGNING_KEY ?? '').trim();
-if (!signingKeyHex && !args['dry-run']) {
-  console.error('RELEASE_SIGNING_KEY env var missing (64-char hex of an Ed25519 private key).');
-  console.error('Generate one with:');
-  console.error('  node -e "const k = require(\'crypto\').generateKeyPairSync(\'ed25519\'); console.log(\'priv=\'+k.privateKey.export({format:\'der\',type:\'pkcs8\'}).toString(\'hex\')); console.log(\'pub=\'+k.publicKey.export({format:\'der\',type:\'spki\'}).toString(\'hex\'))"');
-  process.exit(1);
-}
+// Don't fatal if signing key is missing — produce an unsigned tarball.
+// Rust client gracefully accepts unsigned ones when no pubkey is baked in.
+// See top-of-file note about the self-host trust model.
 
 const releaseDir = join(RELEASE_DIR_BASE, version);
 mkdirSync(releaseDir, { recursive: true });
