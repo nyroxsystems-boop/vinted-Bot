@@ -55,6 +55,48 @@ export function ensureAuthSchema(db: Database.Database) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_chat_channel_time ON chat_messages(channel, created_at);
+
+    -- Password-reset tokens. Single-use, 30 min TTL. Used_at lets us audit
+    -- which token consumed the change; expired/used tokens stay in the table
+    -- as a short audit trail (purged > 30 d by cleanup job, not yet wired).
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      token      TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at    TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_resets(token);
+    CREATE INDEX IF NOT EXISTS idx_pwreset_user  ON password_resets(user_id, created_at);
+
+    -- Stripe webhook idempotency. Each Stripe event arrives with a unique id —
+    -- we INSERT-OR-IGNORE on first sight, IGNORE on retries. Without this a
+    -- transient handler failure that returns 500 would cause Stripe to retry
+    -- and we might issue a duplicate license / fire a duplicate email.
+    CREATE TABLE IF NOT EXISTS stripe_events (
+      event_id    TEXT PRIMARY KEY,
+      type        TEXT NOT NULL,
+      processed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      payload_size INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_stripe_events_type ON stripe_events(type, processed_at);
+
+    -- Desktop session login history — not a session store (sessions are
+    -- stateless), but a thin audit log so we can see how often a user is
+    -- logging in and from how many devices. Useful for fraud / sharing
+    -- detection later (current MVP doesn't enforce a device limit).
+    CREATE TABLE IF NOT EXISTS desktop_logins (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL,
+      machine_id  TEXT,
+      ip_hash     TEXT,
+      user_agent  TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_desktop_logins_user ON desktop_logins(user_id, created_at);
   `);
 
   // Tag the licenses table with user_id if missing — backwards-compatible

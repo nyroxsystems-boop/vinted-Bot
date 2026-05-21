@@ -302,6 +302,41 @@ function stepRow(num: string, title: string, body: string): string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Password-reset email — fires from /api/auth/forgot with a single-use token
+// ──────────────────────────────────────────────────────────────────────────────
+export async function sendPasswordResetEmail(args: { to: string; resetUrl: string }) {
+  const subject = 'Blackruby · Passwort zurücksetzen';
+  const html = `
+<!doctype html>
+<html lang="de">
+<body style="margin:0;background:#0a0a0c;font-family:-apple-system,Inter,sans-serif;color:#e4e4e7;padding:40px 20px">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="560" align="center" style="max-width:560px;background:#13131a;border:1px solid #27272a;border-radius:16px;overflow:hidden">
+    <tr><td style="background:linear-gradient(120deg,#f43f5e,#8b5cf6,#6366f1);padding:28px 32px;color:#fff;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;font-size:13px">BLACKRUBY</td></tr>
+    <tr><td style="padding:32px">
+      <h1 style="margin:0 0 12px 0;font-size:24px;color:#fff">Passwort zurücksetzen</h1>
+      <p style="color:#a1a1aa;font-size:14px;line-height:1.6">
+        Klick auf den Button um ein neues Passwort zu setzen. Der Link ist 30 Minuten gültig
+        und nur einmal verwendbar.
+      </p>
+      <table role="presentation" style="margin:24px 0"><tr><td style="background:linear-gradient(120deg,#f43f5e,#6366f1);border-radius:12px">
+        <a href="${args.resetUrl}" style="display:inline-block;padding:14px 28px;color:#fff;font-weight:700;text-decoration:none">Passwort zurücksetzen →</a>
+      </td></tr></table>
+      <p style="color:#71717a;font-size:12px;line-height:1.6">
+        Wenn du das nicht angefordert hast: ignorier diese Mail. Dein Account bleibt unverändert.
+        Aus Sicherheitsgründen verraten wir nicht ob diese E-Mail existiert — nur falls ja, kommt diese Mail.
+      </p>
+      <hr style="border:none;border-top:1px solid #27272a;margin:24px 0">
+      <p style="color:#52525b;font-size:11px;line-height:1.5">
+        Funktioniert der Button nicht? Kopier den Link in deinen Browser:<br>
+        <span style="color:#71717a;word-break:break-all">${args.resetUrl}</span>
+      </p>
+    </td></tr>
+  </table>
+</body></html>`;
+  await send(args.to, subject, html);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Welcome email — fires on user-account registration (no purchase yet)
 // ──────────────────────────────────────────────────────────────────────────────
 export async function sendWelcomeEmail(args: { to: string }) {

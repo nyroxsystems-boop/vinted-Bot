@@ -39,7 +39,7 @@ import {
   clearSessionCookie,
   type AuthedRequest,
 } from './auth.js';
-import { sendLicenseEmail, sendWelcomeEmail } from './mail.js';
+import { sendLicenseEmail, sendWelcomeEmail, sendPasswordResetEmail } from './mail.js';
 import { OAuth2Client } from 'google-auth-library';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -153,6 +153,17 @@ app.post(
     } catch (err) {
       console.error('[stripe webhook] signature failed', err);
       return res.status(400).send('Invalid signature');
+    }
+
+    // Idempotency: drop if we've already processed this exact Stripe event id.
+    // Without this a webhook retry (e.g. our handler crashed last time) would
+    // duplicate side-effects — issue two licenses, send two mails, etc.
+    const dupe = db
+      .prepare(`INSERT OR IGNORE INTO stripe_events (event_id, type, payload_size) VALUES (?, ?, ?)`)
+      .run(event.id, event.type, req.body?.length ?? 0);
+    if (dupe.changes === 0) {
+      console.log(`[stripe webhook] skipping duplicate event ${event.id} (${event.type})`);
+      return res.json({ received: true, duplicate: true });
     }
 
     if (event.type === 'checkout.session.completed') {
@@ -302,6 +313,48 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
 app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
   if (!req.user) return res.json({ ok: true, user: null });
   res.json({ ok: true, user: { id: req.user.id, email: req.user.email } });
+});
+
+// ── Password reset ─────────────────────────────────────────────────────────
+// POST /api/auth/forgot  body: { email }
+// Always returns 200 even if the email isn't registered — that's by design
+// so we don't leak account existence. If a row matched, we generate a single-
+// use 30-minute token and email it.
+app.post('/api/auth/forgot', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+  if (!email) return res.status(400).json({ ok: false, error: 'invalid_input' });
+  const user = findUserByEmail(db, email);
+  if (user) {
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    db.prepare(`INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)`)
+      .run(user.id, token, expiresAt);
+    const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://blackruby.de';
+    const resetUrl = `${PUBLIC_URL}/login?reset=${token}`;
+    // Fire-and-forget — never block the response on mail delivery.
+    sendPasswordResetEmail({ to: user.email, resetUrl }).catch((e) => console.error('[forgot mail]', e));
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/auth/reset  body: { token, password }
+app.post('/api/auth/reset', async (req: Request, res: Response) => {
+  const { token, password } = req.body as { token?: string; password?: string };
+  if (!token || !password || password.length < 8) {
+    return res.status(400).json({ ok: false, error: 'invalid_input' });
+  }
+  const row = db
+    .prepare(`SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token = ?`)
+    .get(token) as { id: number; user_id: number; expires_at: string; used_at: string | null } | undefined;
+  if (!row) return res.status(404).json({ ok: false, error: 'invalid_token' });
+  if (row.used_at) return res.status(410).json({ ok: false, error: 'token_already_used' });
+  if (new Date(row.expires_at) < new Date()) {
+    return res.status(410).json({ ok: false, error: 'token_expired' });
+  }
+  const hash = await hashPassword(password);
+  db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hash, row.user_id);
+  db.prepare(`UPDATE password_resets SET used_at = datetime('now') WHERE id = ?`).run(row.id);
+  res.json({ ok: true });
 });
 
 // ── Members ─────────────────────────────────────────────────────────────────
@@ -973,6 +1026,22 @@ app.post('/api/desktop/session', async (req: Request, res: Response) => {
   };
   const payloadStr = JSON.stringify(payload);
   const signature = createHmac('sha256', LICENSE_SIGNING_SECRET).update(payloadStr).digest('hex');
+
+  // Audit the login. We hash the IP rather than store it raw to dodge the
+  // 'storage of full IPs needs explicit consent' DSGVO bucket. SHA-256 with
+  // LICENSE_SIGNING_SECRET as salt is irreversible without the secret.
+  try {
+    const rawIp = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+      ?? req.socket.remoteAddress
+      ?? '';
+    const ipHash = rawIp ? createHmac('sha256', LICENSE_SIGNING_SECRET).update(rawIp).digest('hex').slice(0, 16) : null;
+    const userAgent = (req.headers['user-agent'] as string | undefined)?.slice(0, 200) ?? null;
+    db.prepare(`INSERT INTO desktop_logins (user_id, machine_id, ip_hash, user_agent) VALUES (?, ?, ?, ?)`)
+      .run(user.id, machine_id ?? null, ipHash, userAgent);
+  } catch (e) {
+    // Audit failure must not block login — just log.
+    console.warn('[desktop/session] audit insert failed:', e);
+  }
 
   res.json({
     ok: true,
