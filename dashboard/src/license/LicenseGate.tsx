@@ -68,7 +68,7 @@ export function LicenseGate({ onActivate, previousKey, reason }: Props) {
             <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <span>
-                Lizenz konnte länger als 72 h nicht mit dem Server abgeglichen werden.
+                Lizenz konnte länger als 96 h nicht mit dem Server abgeglichen werden.
                 Geh kurz online und aktiviere erneut — danach läuft alles wie gewohnt.
               </span>
             </div>

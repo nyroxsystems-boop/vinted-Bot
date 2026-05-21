@@ -1,6 +1,15 @@
 node_modules/
 dist/
 build/
+# Marketing-server runtime data — DBs + the release-manifest are
+# server-side state, not source. Customer-Tauri-clients fetch them via
+# /api/releases/latest, never via filesystem. Shipping a stale
+# localhost-URL releases.json to prod is a real foot-gun.
+marketing/data/*.db
+marketing/data/*.db-shm
+marketing/data/*.db-wal
+marketing/data/releases.json
+
 # Rust / Tauri build artefacts
 app/src-tauri/target/
 app/src-tauri/gen/

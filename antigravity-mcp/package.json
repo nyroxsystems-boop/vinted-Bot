@@ -13,11 +13,11 @@
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@vinted-system/shared": "*",
     "chokidar": "^4.0.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
-    "tsx": "^4.19.2",
     "typescript": "^5.4.5"
   }
 }

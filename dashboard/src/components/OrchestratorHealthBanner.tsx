@@ -15,6 +15,10 @@ import { currentApiOrigin, pingOrchestrator, setOrchestratorOriginOverride } fro
 const STARTUP_GRACE_MS = 30_000;
 const PING_INTERVAL_MS = 3_000;          // tighter than before so cold-start completes fast
 const ALARM_AFTER_FAILURES = 3;
+// Cap the rate-of-polling when the backend is genuinely down. Without
+// this, an overnight outage spams 28,800 fetch() calls per browser tab.
+// Audit Finding #13 (Batch 3).
+const MAX_PING_INTERVAL_MS = 30_000;
 
 export function OrchestratorHealthBanner() {
   const [reachable, setReachable] = useState<boolean | null>(null);
@@ -26,7 +30,16 @@ export function OrchestratorHealthBanner() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const nextDelay = (): number => {
+      // 3s, 3s, 6s, 12s, 24s, then cap at 30s. Recovery resets failure count.
+      const fails = failuresRef.current;
+      if (fails < 2) return PING_INTERVAL_MS;
+      const exp = Math.min(PING_INTERVAL_MS * Math.pow(2, fails - 1), MAX_PING_INTERVAL_MS);
+      return exp;
+    };
     const check = async () => {
+      if (cancelled) return;
       const ok = await pingOrchestrator();
       if (cancelled) return;
       if (ok) {
@@ -35,23 +48,20 @@ export function OrchestratorHealthBanner() {
         setReachable(true);
       } else {
         failuresRef.current++;
-        // Banner-Logik:
-        //  - während der Startup-Grace: tolerate failures, no alarm
-        //  - after grace: alarm only after N consecutive failures
-        //  - if we've never seen success yet AND we're past grace, still
-        //    show the soft "Bootet…" (max 60 s), then escalate to alarm
         const ageMs = Date.now() - startedAt;
         const grace = ageMs < STARTUP_GRACE_MS && !everSucceededRef.current;
         if (grace) {
-          setReachable(null);                   // null → soft "booting"-banner
+          setReachable(null);
         } else if (failuresRef.current >= ALARM_AFTER_FAILURES) {
-          setReachable(false);                  // hard alarm
+          setReachable(false);
         }
+      }
+      if (!cancelled) {
+        timer = setTimeout(check, nextDelay());
       }
     };
     void check();
-    const t = setInterval(check, PING_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(t); };
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [startedAt]);
 
   // Reachable or unknown without alarm → no banner
