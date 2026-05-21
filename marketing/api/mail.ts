@@ -1,64 +1,92 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Mail service — sends license keys + transactional notifications.
 //
-// SMTP via Strato (info@blackruby.de). Configured by env:
-//   SMTP_HOST     default smtp.strato.de
-//   SMTP_PORT     default 465 (SSL)
-//   SMTP_USER     default info@blackruby.de
-//   SMTP_PASS     the mailbox password — set this in Railway
-//   SMTP_FROM     default 'Blackruby <info@blackruby.de>'
+// Primary transport: Resend (https://resend.com) — set RESEND_API_KEY.
+// Optional fallback: SMTP via nodemailer if SMTP_PASS is set (kept around
+// so we can pivot back to Plesk/Strato later without code churn).
+// Dev fallback: console-only logging if neither RESEND_API_KEY nor SMTP_PASS
+// is configured.
 //
-// In dev (no SMTP_PASS) the transport falls back to a console-logger so the
-// HTML body is visible in the terminal and nothing actually goes out.
+// FROM address comes from MAIL_FROM (preferred) or SMTP_FROM (legacy).
+// Default 'Blackruby <info@blackruby.de>'. When using Resend, the sending
+// domain must be verified in the Resend dashboard.
+//
+// THROWS on failure so callers can decide to retry — previously errors were
+// silently swallowed and the webhook returned 200 even with no email out.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import nodemailer, { type Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 
-const SMTP_HOST = process.env.SMTP_HOST ?? 'smtp.strato.de';
+const RESEND_API_KEY = process.env.RESEND_API_KEY ?? '';
+const SMTP_HOST = process.env.SMTP_HOST ?? '';
 const SMTP_PORT = Number(process.env.SMTP_PORT ?? 465);
 const SMTP_USER = process.env.SMTP_USER ?? 'info@blackruby.de';
 const SMTP_PASS = process.env.SMTP_PASS ?? '';
-const SMTP_FROM = process.env.SMTP_FROM ?? 'Blackruby <info@blackruby.de>';
+const MAIL_FROM = process.env.MAIL_FROM ?? process.env.SMTP_FROM ?? 'Blackruby <info@blackruby.de>';
 
-let _transporter: Transporter | null = null;
-function transporter(): Transporter {
-  if (_transporter) return _transporter;
-  if (!SMTP_PASS) {
-    // Console-only fallback. Lets local dev work without a real mailbox.
-    _transporter = nodemailer.createTransport({
-      jsonTransport: true,
-    });
-    console.warn('[mail] SMTP_PASS missing — emails will be logged to console only');
-  } else {
-    _transporter = nodemailer.createTransport({
+let _resend: Resend | null = null;
+function resendClient(): Resend {
+  if (!_resend) _resend = new Resend(RESEND_API_KEY);
+  return _resend;
+}
+
+let _smtp: Transporter | null = null;
+function smtpClient(): Transporter {
+  if (!_smtp) {
+    _smtp = nodemailer.createTransport({
       host: SMTP_HOST,
       port: SMTP_PORT,
       secure: SMTP_PORT === 465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
   }
-  return _transporter;
+  return _smtp;
 }
 
 async function send(to: string, subject: string, html: string, text?: string) {
-  try {
-    const t = transporter();
-    const info = await t.sendMail({
-      from: SMTP_FROM,
-      to,
-      subject,
-      html,
-      text: text ?? stripHtml(html),
-    });
-    if (!SMTP_PASS) {
-      console.log(`[mail/dev] would send to ${to}: ${subject}`);
-      console.log(info.message?.toString?.());
-    } else {
-      console.log(`[mail] sent ${subject} → ${to} · id=${info.messageId}`);
+  const plain = text ?? stripHtml(html);
+
+  // Path 1: Resend (recommended for production)
+  if (RESEND_API_KEY) {
+    try {
+      const r = await resendClient().emails.send({
+        from: MAIL_FROM,
+        to: [to],
+        subject,
+        html,
+        text: plain,
+      });
+      if (r.error) throw new Error(`resend: ${r.error.name} — ${r.error.message}`);
+      console.log(`[mail/resend] sent "${subject}" → ${to} · id=${r.data?.id}`);
+      return;
+    } catch (e) {
+      console.error(`[mail/resend] FAILED "${subject}" → ${to}:`, e);
+      throw e;
     }
-  } catch (e) {
-    console.error(`[mail] failed ${subject} → ${to}:`, e);
   }
+
+  // Path 2: SMTP fallback (kept for emergency use / dev with real mailbox)
+  if (SMTP_PASS && SMTP_HOST) {
+    try {
+      const info = await smtpClient().sendMail({
+        from: MAIL_FROM,
+        to,
+        subject,
+        html,
+        text: plain,
+      });
+      console.log(`[mail/smtp] sent "${subject}" → ${to} · id=${info.messageId}`);
+      return;
+    } catch (e) {
+      console.error(`[mail/smtp] FAILED "${subject}" → ${to}:`, e);
+      throw e;
+    }
+  }
+
+  // Path 3: dev console
+  console.warn(`[mail/dev] no provider configured — would send "${subject}" → ${to}`);
+  console.log(html);
 }
 
 function stripHtml(s: string): string {
