@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { LandingPage } from './pages/Landing';
 import { PricingPage } from './pages/Pricing';
 import { MembersPage } from './pages/Members';
+import { LoginPage } from './pages/Login';
 import { CheckoutSuccessPage } from './pages/CheckoutSuccess';
 import { DownloadsPage } from './pages/Downloads';
 import { LegalPage } from './pages/Legal';
@@ -15,6 +16,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/members" element={<MembersPage />} />
         <Route path="/success" element={<CheckoutSuccessPage />} />
         <Route path="/downloads" element={<DownloadsPage />} />

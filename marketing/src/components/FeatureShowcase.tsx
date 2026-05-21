@@ -13,19 +13,12 @@
 import { useEffect, useState } from 'react';
 import {
   Sparkles,
-  Globe,
   Lock,
   Wand2,
-  Layers,
-  TrendingUp,
   Truck,
-  ShieldCheck,
   Check,
   ScanLine,
   Activity,
-  ArrowUpRight,
-  Heart,
-  Eye,
   Tag,
   Image as ImageIcon,
   CheckCircle2,
@@ -35,7 +28,6 @@ import {
   Mic,
   Cpu,
   ShoppingBag,
-  Hourglass,
 } from 'lucide-react';
 import { Reveal } from './Reveal';
 

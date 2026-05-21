@@ -1,8 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
+import { User } from 'lucide-react';
 import { Logo } from './Logo';
+import { useAuth } from '../lib/auth';
 
 export function Nav() {
   const { pathname } = useLocation();
+  const { user, ready } = useAuth();
+
   const link = (to: string, label: string) => (
     <Link
       to={to}
@@ -27,12 +31,24 @@ export function Nav() {
           {link('/', 'Übersicht')}
           {link('/pricing', 'Preise')}
           {link('/downloads', 'Download')}
-          {link('/members', 'Mitglieder')}
+          {user && link('/members', 'Mitglieder')}
         </nav>
         <div className="flex items-center gap-3">
-          <Link to="/members" className="btn-ghost hidden md:inline-flex">
-            Login
-          </Link>
+          {ready && user ? (
+            <Link
+              to="/members"
+              className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/[0.06] md:inline-flex"
+            >
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-gradient-to-br from-ruby-500 to-indigo-500 text-[10px] font-bold text-white">
+                {user.email.charAt(0).toUpperCase()}
+              </span>
+              <span className="max-w-[140px] truncate font-mono text-[11px] normal-case">{user.email}</span>
+            </Link>
+          ) : (
+            <Link to="/login" className="btn-ghost hidden md:inline-flex">
+              <User size={14} /> Login
+            </Link>
+          )}
           <Link to="/pricing" className="btn-primary">
             Jetzt starten
           </Link>

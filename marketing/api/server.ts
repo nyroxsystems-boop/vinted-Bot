@@ -26,6 +26,20 @@ import { randomBytes, createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import {
+  ensureAuthSchema,
+  hashPassword,
+  verifyPassword,
+  makeAuthMiddleware,
+  requireAuth,
+  findUserByEmail,
+  createUser,
+  bindLicensesToUser,
+  issueSession,
+  clearSessionCookie,
+  type AuthedRequest,
+} from './auth.js';
+import { sendLicenseEmail, sendWelcomeEmail } from './mail.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, '../data');
@@ -54,6 +68,9 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// Auth + chat schema (additive, idempotent)
+ensureAuthSchema(db);
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY ?? '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? '';
@@ -189,8 +206,169 @@ app.post(
 
 app.use(express.json());
 
+// Attach `req.user` whenever a valid session cookie is present.
+app.use(makeAuthMiddleware(LICENSE_SIGNING_SECRET));
+
+// ── Auth routes ─────────────────────────────────────────────────────────────
+// POST /api/auth/register  body: { email, password } → 201 + session cookie
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  const { email, password } = req.body as { email?: string; password?: string };
+  if (!email || !password || password.length < 8) {
+    return res.status(400).json({ ok: false, error: 'invalid_input' });
+  }
+  const existing = findUserByEmail(db, email);
+  if (existing) return res.status(409).json({ ok: false, error: 'email_in_use' });
+  const hash = await hashPassword(password);
+  const user = createUser(db, email, hash);
+  bindLicensesToUser(db, user.id, user.email);
+  issueSession(res, user, LICENSE_SIGNING_SECRET);
+  sendWelcomeEmail({ to: user.email }).catch((e) => console.error('[welcome mail]', e));
+  res.status(201).json({ ok: true, user: { id: user.id, email: user.email } });
+});
+
+// POST /api/auth/login  body: { email, password } → session cookie
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const { email, password } = req.body as { email?: string; password?: string };
+  if (!email || !password) return res.status(400).json({ ok: false, error: 'invalid_input' });
+  const user = findUserByEmail(db, email);
+  if (!user) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+  bindLicensesToUser(db, user.id, user.email);
+  issueSession(res, user, LICENSE_SIGNING_SECRET);
+  res.json({ ok: true, user: { id: user.id, email: user.email } });
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// GET /api/auth/me — returns the current user (or null when not logged in)
+app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
+  if (!req.user) return res.json({ ok: true, user: null });
+  res.json({ ok: true, user: { id: req.user.id, email: req.user.email } });
+});
+
+// ── Members ─────────────────────────────────────────────────────────────────
+// GET /api/members/dashboard — current user + their licenses (live status)
+app.get('/api/members/dashboard', requireAuth, (req: AuthedRequest, res: Response) => {
+  const user = req.user!;
+  // Re-bind in case licenses were issued to the same email after signup.
+  bindLicensesToUser(db, user.id, user.email);
+  const licenses = db
+    .prepare(
+      `SELECT key, tier, cadence, status, stripe_customer, stripe_sub, issued_at, expires_at
+         FROM licenses
+        WHERE user_id = ? OR email = ?
+        ORDER BY issued_at DESC`,
+    )
+    .all(user.id, user.email);
+  res.json({ ok: true, user, licenses });
+});
+
+// POST /api/members/portal — Stripe Customer Portal for subscription mgmt
+app.post('/api/members/portal', requireAuth, async (req: AuthedRequest, res: Response) => {
+  if (MOCK_MODE || !stripe) return res.status(503).json({ ok: false, error: 'stripe_disabled' });
+  const user = req.user!;
+  // Find any license with a stripe_customer for this user.
+  const row = db
+    .prepare(
+      `SELECT stripe_customer FROM licenses
+        WHERE (user_id = ? OR email = ?) AND stripe_customer IS NOT NULL
+        LIMIT 1`,
+    )
+    .get(user.id, user.email) as { stripe_customer: string } | undefined;
+  if (!row) return res.status(404).json({ ok: false, error: 'no_subscription' });
+  const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://blackruby.de';
+  const portal = await stripe.billingPortal.sessions.create({
+    customer: row.stripe_customer,
+    return_url: `${PUBLIC_URL}/members`,
+  });
+  res.json({ ok: true, url: portal.url });
+});
+
+// ── Chat (Discord-style channels with SSE live updates) ─────────────────────
+const CHAT_CHANNELS = ['general', 'support', 'sales-wins', 'beta'];
+
+// Pub/sub bus for SSE — Node's EventEmitter is enough for a single-instance
+// deployment. If we ever go multi-replica we'll swap this for Redis.
+import { EventEmitter } from 'node:events';
+const chatBus = new EventEmitter();
+chatBus.setMaxListeners(200);
+
+// GET /api/chat/channels
+app.get('/api/chat/channels', requireAuth, (_req: AuthedRequest, res: Response) => {
+  res.json({ ok: true, channels: CHAT_CHANNELS });
+});
+
+// GET /api/chat/messages?channel=general — last 100 messages with user emails
+app.get('/api/chat/messages', requireAuth, (req: AuthedRequest, res: Response) => {
+  const channel = String(req.query.channel ?? 'general');
+  if (!CHAT_CHANNELS.includes(channel)) return res.status(400).json({ ok: false, error: 'unknown_channel' });
+  const rows = db
+    .prepare(
+      `SELECT m.id, m.body, m.created_at, u.id AS user_id, u.email AS user_email
+         FROM chat_messages m
+         JOIN users u ON u.id = m.user_id
+        WHERE m.channel = ?
+        ORDER BY m.id DESC
+        LIMIT 100`,
+    )
+    .all(channel) as Array<{ id: number; body: string; created_at: string; user_id: number; user_email: string }>;
+  res.json({ ok: true, messages: rows.reverse() });
+});
+
+// POST /api/chat/post  body: { channel, body }
+app.post('/api/chat/post', requireAuth, (req: AuthedRequest, res: Response) => {
+  const user = req.user!;
+  const { channel, body } = req.body as { channel?: string; body?: string };
+  const text = (body ?? '').trim();
+  if (!channel || !CHAT_CHANNELS.includes(channel)) return res.status(400).json({ ok: false, error: 'unknown_channel' });
+  if (!text) return res.status(400).json({ ok: false, error: 'empty' });
+  if (text.length > 2000) return res.status(400).json({ ok: false, error: 'too_long' });
+  const r = db
+    .prepare(`INSERT INTO chat_messages (channel, user_id, body) VALUES (?, ?, ?)`)
+    .run(channel, user.id, text);
+  const msg = {
+    id: Number(r.lastInsertRowid),
+    channel,
+    body: text,
+    created_at: new Date().toISOString(),
+    user_id: user.id,
+    user_email: user.email,
+  };
+  chatBus.emit(`channel:${channel}`, msg);
+  res.json({ ok: true, message: msg });
+});
+
+// GET /api/chat/stream?channel=general — Server-Sent-Events live feed
+app.get('/api/chat/stream', requireAuth, (req: AuthedRequest, res: Response) => {
+  const channel = String(req.query.channel ?? 'general');
+  if (!CHAT_CHANNELS.includes(channel)) return res.status(400).end();
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(`: connected to ${channel}\n\n`);
+  const send = (m: unknown) => res.write(`data: ${JSON.stringify(m)}\n\n`);
+  const onMsg = (m: unknown) => send(m);
+  chatBus.on(`channel:${channel}`, onMsg);
+
+  // Heartbeat every 25s — keeps proxies (Railway edge) from killing the conn.
+  const hb = setInterval(() => res.write(`: ping\n\n`), 25_000);
+
+  req.on('close', () => {
+    clearInterval(hb);
+    chatBus.off(`channel:${channel}`, onMsg);
+  });
+});
+
 // ── POST /api/checkout ──────────────────────────────────────────────────────
-app.post('/api/checkout', async (req: Request, res: Response) => {
+app.post('/api/checkout', async (req: AuthedRequest, res: Response) => {
   if (CHECKOUT_DISABLED) {
     return res.status(503).json({ ok: false, error: 'Checkout temporarily unavailable. Stripe not configured on this deployment.' });
   }
@@ -219,21 +397,25 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
     return res.status(500).json({ ok: false, error: `No Stripe price configured for ${tier}-${cad}` });
   }
 
+  // If the visitor is logged in, pre-fill Stripe Checkout with their email
+  // and stamp the user_id into metadata so the webhook can bind cleanly.
+  const meta: Record<string, string> = { tier, cadence: cad };
+  if (req.user) meta.user_id = String(req.user.id);
+
   const session = await stripe!.checkout.sessions.create({
     mode: 'subscription',
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${PUBLIC_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${PUBLIC_URL}/pricing`,
     allow_promotion_codes: true,
+    customer_email: req.user?.email,
     // EU MwSt — wir verkaufen B2C an Endverbraucher (Kleinunternehmer-Setup
     // braucht's nicht, alle anderen brauchen es). `automatic_tax` setzt MwSt
     // basierend auf billing-address + Reverse-Charge bei B2B (tax_id_collection).
-    // `customer_update` ist nur valid wenn ein bestehender customer übergeben
-    // wird — beim neuen Checkout-Flow nicht möglich, also weglassen.
     automatic_tax: { enabled: true },
     billing_address_collection: 'required',
     tax_id_collection: { enabled: true },
-    metadata: { tier, cadence: cad },
+    metadata: meta,
   });
   db.prepare(`INSERT INTO checkout_sessions (session_id) VALUES (?)`).run(session.id);
   res.json({ ok: true, url: session.url });
@@ -685,6 +867,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (!email) return;
   const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id ?? null;
   const subId = typeof session.subscription === 'string' ? session.subscription : null;
+  // Either a logged-in user or one whose email already exists in the user table.
+  const metaUserId = Number(session.metadata?.user_id ?? 0) || null;
+  const userByEmail = findUserByEmail(db, email);
+  const userId = metaUserId ?? userByEmail?.id ?? null;
+  const amountEur = (session.amount_total ?? (tier === 'hustler' ? 19900 : 9900)) / 100;
 
   // Idempotency: webhook can fire twice (Stripe retries), and /api/checkout/result
   // may also race ahead. Check by customer OR sub, in active or cancelled states.
@@ -697,9 +884,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     )
     .get(customerId, subId) as { key: string } | undefined;
   if (existing) {
-    // Still bind the session → license mapping so /checkout/result resolves.
+    // Still bind the session → license mapping so /checkout/result resolves,
+    // and back-fill the user_id if we now know it.
     db.prepare(`UPDATE checkout_sessions SET license_key = COALESCE(license_key, ?) WHERE session_id = ?`)
       .run(existing.key, session.id);
+    if (userId) {
+      db.prepare(`UPDATE licenses SET user_id = COALESCE(user_id, ?) WHERE key = ?`).run(userId, existing.key);
+    }
     return;
   }
   // Belt-and-suspenders: maybe /api/checkout/result already issued + bound this session.
@@ -716,6 +907,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     stripeSub: subId,
   });
   db.prepare(`UPDATE checkout_sessions SET license_key = ? WHERE session_id = ?`).run(lic.key, session.id);
+  if (userId) {
+    db.prepare(`UPDATE licenses SET user_id = ? WHERE key = ?`).run(userId, lic.key);
+  }
+
+  // Fire-and-forget: send the license email. Errors are logged inside mail.ts
+  // so the webhook still returns 200 (Stripe should not retry on mail bugs).
+  sendLicenseEmail({ to: email, licenseKey: lic.key, tier, amountEur }).catch(() => {});
 }
 
 function issueLicense(args: {

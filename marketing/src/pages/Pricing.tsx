@@ -1,6 +1,8 @@
-import { Check, Sparkles, ArrowRight, Shield } from 'lucide-react';
+import { Check, Sparkles, ArrowRight, Shield, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Nav } from '../components/Nav';
 import { Footer } from '../components/Footer';
+import { useAuth } from '../lib/auth';
 
 interface Tier {
   id: 'starter' | 'hustler';
@@ -46,10 +48,21 @@ const TIERS: Tier[] = [
 ];
 
 export function PricingPage() {
+  const { user, ready } = useAuth();
+  const navigate = useNavigate();
+
   async function checkout(tier: Tier['id']) {
+    // Gate behind login so every purchase is bound to a user account and
+    // the license is immediately visible in the member-space after payment.
+    if (!ready) return;
+    if (!user) {
+      navigate(`/login?next=${encodeURIComponent('/pricing')}`);
+      return;
+    }
     try {
       const r = await fetch('/api/checkout', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tier, cadence: 'monthly' }),
       });
@@ -116,8 +129,16 @@ export function PricingPage() {
                   onClick={() => void checkout(t.id)}
                   className={t.featured ? 'btn-primary w-full justify-center' : 'btn-ghost w-full justify-center'}
                 >
-                  Plan wählen
-                  <ArrowRight size={14} />
+                  {ready && !user ? (
+                    <>
+                      <Lock size={14} /> Anmelden &amp; kaufen
+                    </>
+                  ) : (
+                    <>
+                      Plan wählen
+                      <ArrowRight size={14} />
+                    </>
+                  )}
                 </button>
               </div>
             ))}
