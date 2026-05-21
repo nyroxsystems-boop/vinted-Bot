@@ -704,11 +704,63 @@ app.post('/api/license/validate', async (req: Request, res: Response) => {
 
 // ── GET /api/releases/latest ────────────────────────────────────────────────
 const RELEASES_FILE = resolve(__dirname, '../data/releases.json');
-app.get('/api/releases/latest', (_req: Request, res: Response) => {
+
+// Live-fetch from GitHub Releases — keeps the marketing site in sync with
+// whatever the CI just published without a manual file update on Railway.
+// Cached in-memory for 5 minutes so a /downloads page-view burst doesn't
+// burn the unauthenticated GitHub rate limit (60 req/h per IP).
+const GH_REPO = 'nyroxsystems-boop/vinted-Bot';
+let _releaseCache: { release: Record<string, unknown>; cachedAt: number } | null = null;
+const RELEASE_CACHE_TTL_MS = 5 * 60_000;
+
+async function fetchLatestRelease(): Promise<Record<string, unknown> | null> {
+  if (_releaseCache && Date.now() - _releaseCache.cachedAt < RELEASE_CACHE_TTL_MS) {
+    return _releaseCache.release;
+  }
   try {
-    if (!existsSync(RELEASES_FILE)) {
-      return res.json({ ok: true, release: defaultRelease() });
+    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, {
+      headers: { 'User-Agent': 'blackruby-marketing-api', Accept: 'application/vnd.github+json' },
+    });
+    if (!r.ok) {
+      console.warn('[releases] GitHub API returned', r.status);
+      return null;
     }
+    const gh = (await r.json()) as {
+      tag_name: string;
+      published_at: string;
+      body?: string;
+      assets?: Array<{ name: string; browser_download_url: string; size: number }>;
+    };
+    const release = {
+      version: gh.tag_name.replace(/^v/, ''),
+      released_at: gh.published_at,
+      notes: (gh.body ?? '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s.startsWith('- ') || s.startsWith('* '))
+        .map((s) => s.replace(/^[-*]\s+/, ''))
+        .slice(0, 8),
+      assets: (gh.assets ?? []).map((a) => ({
+        name: a.name,
+        size: a.size,
+        url: a.browser_download_url,
+      })),
+    };
+    _releaseCache = { release, cachedAt: Date.now() };
+    return release;
+  } catch (e) {
+    console.warn('[releases] GitHub fetch failed', e);
+    return null;
+  }
+}
+
+app.get('/api/releases/latest', async (_req: Request, res: Response) => {
+  // Try GitHub first (authoritative — what CI just published)
+  const live = await fetchLatestRelease();
+  if (live) return res.json({ ok: true, release: live });
+  // Fallback to on-disk manifest (legacy / local-dev path)
+  try {
+    if (!existsSync(RELEASES_FILE)) return res.json({ ok: true, release: defaultRelease() });
     const raw = readFileSync(RELEASES_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     res.json({ ok: true, release: parsed });
