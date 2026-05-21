@@ -1,1 +1,1 @@
-# Placeholder — gets overwritten by scripts/stage-bundle.mjs during release builds.
+# Placeholder — overwritten by scripts/stage-bundle.mjs on CI.

@@ -6,7 +6,7 @@
 // any offer) that the offer-accept flow never sees.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { createLogger, getDb, isPaused, listActiveAccounts, withLock } from '@vinted-system/shared';
+import { createLogger, getDb, isPaused, listActiveAccountsFor, withLock } from '@vinted-system/shared';
 import { eventBus } from './events.js';
 
 const log = createLogger('sold-items-poller');
@@ -69,7 +69,12 @@ async function pollAccount(accountId: number): Promise<void> {
 async function tick(): Promise<void> {
   if (isPaused()) return;
   await withLock('sold-items-poller-tick', 300, async () => {
-    const accounts = listActiveAccounts();
+    // ONLY iterate Vinted accounts. Passing eBay/KA/Depop account-IDs to
+    // the vinted-bot's /scan/sold-items endpoint spins up a Chromium
+    // profile for that wrong-marketplace account, navigates to vinted.de,
+    // sees "not authenticated", fails — repeatedly, every 30 minutes,
+    // forever. (Audit Finding #6.)
+    const accounts = listActiveAccountsFor('vinted');
     for (const acc of accounts) {
       await pollAccount(acc.id);
     }

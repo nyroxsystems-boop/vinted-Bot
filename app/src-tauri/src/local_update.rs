@@ -93,6 +93,11 @@ fn bundle_built_at() -> Option<SystemTime> {
     // Prefer the installed .app in /Applications — that's what the user
     // actually launches. Fall back to the target/release build dir.
     let candidates = [
+        // Current productName (tauri.conf.json:3) is "Blackruby". The old
+        // "Vinted-System.app" path was the productName before the rename
+        // and breaks the in-app update check after re-install.
+        PathBuf::from("/Applications/Blackruby.app/Contents/MacOS/vinted-system-app"),
+        // Legacy fallback in case the user hasn't migrated yet.
         PathBuf::from("/Applications/Vinted-System.app/Contents/MacOS/vinted-system-app"),
     ];
     for p in &candidates {
@@ -170,14 +175,21 @@ pub fn rebuild_and_install(
         return Err(format!("npm run app:build failed with status {}", status));
     }
 
+    // App was renamed from "Vinted-System" to "Blackruby" in
+    // tauri.conf.json. Tauri's bundler writes to the productName subdir.
     let built = repo_root
-        .join("app/src-tauri/target/release/bundle/macos/Vinted-System.app");
+        .join("app/src-tauri/target/release/bundle/macos/Blackruby.app");
     if !built.exists() {
         return Err(format!("build succeeded but {} missing", built.display()));
     }
 
     emit_progress(app, "installing", "Installiere frische App in /Applications…");
-    let target = PathBuf::from("/Applications/Vinted-System.app");
+    let target = PathBuf::from("/Applications/Blackruby.app");
+    // Also wipe the legacy install path so users who ran the old name'd
+    // app don't end up with two copies.
+    let _ = std::process::Command::new("/bin/rm")
+        .args(["-rf", "/Applications/Vinted-System.app"])
+        .status();
     // Remove old (ignore errors — it may not exist).
     let _ = std::process::Command::new("/bin/rm")
         .args(["-rf", target.to_str().unwrap()])

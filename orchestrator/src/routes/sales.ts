@@ -74,13 +74,38 @@ salesRouter.post('/manual', async (req, res) => {
     let listPrice: number;
     let folderNum: number | null = null;
 
+    // Try to derive folder_num from the existing listing → marketplace_listings
+    // link. Without folderNum the lockSold step below is a no-op and cross-
+    // platform listings stay active → double-sell. This bug was real
+    // (audit Finding #2).
+    const resolveFolderNum = (vintedItemId: string | null, externalId: string | null): number | null => {
+      if (vintedItemId) {
+        const r = db.prepare(`
+          SELECT folder_num FROM marketplace_listings
+           WHERE external_id = CAST(? AS TEXT)
+           LIMIT 1
+        `).get(vintedItemId) as { folder_num: number } | undefined;
+        if (r) return r.folder_num;
+      }
+      if (externalId) {
+        const r = db.prepare(`
+          SELECT folder_num FROM marketplace_listings
+           WHERE external_id = ? AND marketplace = ?
+           LIMIT 1
+        `).get(externalId, body.marketplace) as { folder_num: number } | undefined;
+        if (r) return r.folder_num;
+      }
+      return null;
+    };
+
     if (body.listing_id) {
       const row = db.prepare(`
-        SELECT id, list_price_eur FROM listings WHERE id = ?
-      `).get(body.listing_id) as { id: number; list_price_eur: number } | undefined;
+        SELECT id, list_price_eur, vinted_item_id FROM listings WHERE id = ?
+      `).get(body.listing_id) as { id: number; list_price_eur: number; vinted_item_id: string | null } | undefined;
       if (!row) return res.status(404).json({ ok: false, error: `listing_id ${body.listing_id} not found` });
       listingId = row.id;
       listPrice = row.list_price_eur;
+      folderNum = resolveFolderNum(row.vinted_item_id, body.external_id ?? null);
     } else {
       if (!body.title || typeof body.list_price_eur !== 'number') {
         return res.status(400).json({ ok: false, error: 'Either listing_id OR (title + list_price_eur) required' });
@@ -108,6 +133,10 @@ salesRouter.post('/manual', async (req, res) => {
         listingId = inserted.id;
       }
       listPrice = body.list_price_eur;
+      // Synthesized listings have no vinted_item_id, so the only chance to
+      // find a folder is via the user-supplied external_id matching a
+      // marketplace_listings row for the same marketplace.
+      folderNum = resolveFolderNum(null, body.external_id ?? null);
     }
 
     // ── 2. Insert sales row (idempotent: bail if a sale already exists for

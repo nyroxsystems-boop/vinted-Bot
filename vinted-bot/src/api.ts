@@ -519,8 +519,12 @@ export function createVintedApi(): express.Express {
   app.post('/chats/:chatId/send', async (req, res) => {
     if (rejectIfLogin(res)) return;
     const chatId = Number.parseInt(req.params.chatId, 10);
-    const { message } = req.body as { message?: string };
-    if (!message) return res.status(400).json({ ok: false, error: 'message required' });
+    // Accept both `message` (new canonical) and `body` (legacy from
+    // reply-autopilot pre-fix) so a version-skew between orchestrator and
+    // vinted-bot doesn't silently kill all auto-replies.
+    const { message, body } = req.body as { message?: string; body?: string };
+    const text = message ?? body;
+    if (!text) return res.status(400).json({ ok: false, error: 'message required' });
 
     const chat = getDb()
       .prepare('SELECT vinted_conversation_id, account_id FROM chats WHERE id = ?')
@@ -545,7 +549,7 @@ export function createVintedApi(): express.Express {
           const { VINTED } = await import('./selectors.js');
           const textarea = page.locator(VINTED.textInput).first();
           await textarea.waitFor({ state: 'visible', timeout: 10_000 });
-          await textarea.fill(message);
+          await textarea.fill(text);
           await page.waitForTimeout(300);
 
           const sendBtn = page.locator(VINTED.sendButton).first();

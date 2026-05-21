@@ -520,7 +520,11 @@ async function sendViaVintedBot(
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ body }),
+      // vinted-bot/src/api.ts:519 expects { message }, NOT { body }. The
+       // wrong field name caused every Vinted auto-reply to fail silently
+       // with HTTP 400 — auto-publisher kept marking the draft as 'failed'
+       // and the user saw no replies going out.
+       body: JSON.stringify({ message: body }),
       signal: AbortSignal.timeout(60_000),
     });
     if (!r.ok) {

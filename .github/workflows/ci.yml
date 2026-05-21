@@ -91,14 +91,25 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
 
-      - name: Build dashboard (license-gate bypassed — no marketing-api deployed)
-        # VITE_BYPASS_LICENSE=true bakes a "skip license check" flag into the
-        # dashboard bundle. Without it the app boots into a LicenseGate that
-        # tries to validate against https://blackruby.app — which doesn't
-        # exist yet. Once we deploy a real marketing-api with Stripe, drop
-        # this env var to re-enable license enforcement for customer builds.
+      - name: Build dashboard
+        # License-gate stays ACTIVE for customer builds — VITE_BYPASS_LICENSE
+        # used to be set here as a "temporary" workaround while blackruby.app
+        # wasn't deployed. That meant every paying customer could install +
+        # use the app without entering a license key — instant piracy.
+        #
+        # If you need to test the bundle locally without a license server,
+        # put VITE_BYPASS_LICENSE=true in .env.local — but DO NOT pass it
+        # through the CI environment. The LicenseProvider has its own offline
+        # grace window (96h) so customers don't get kicked out by transient
+        # outages of the validation API.
         env:
-          VITE_BYPASS_LICENSE: 'true'
+          # The signing-secret half of the HMAC pair. Pulled from repo
+          # secrets so customer builds verify license payloads server-side.
+          VITE_LICENSE_VERIFY_KEY: ${{ secrets.LICENSE_VERIFY_KEY }}
+          # Optional override for the validation API. Default in
+          # LicenseProvider is https://blackruby.app — keep this var unset
+          # in CI to use the default once the marketing-api goes live.
+          VITE_LICENSE_API_URL: ${{ secrets.LICENSE_API_URL }}
         run: npm run -w @vinted-system/dashboard build
 
       - name: Stage bundle payload (Node.js + system + Playwright Chromium)
@@ -137,14 +148,25 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
 
-      - name: Build dashboard (license-gate bypassed — no marketing-api deployed)
-        # VITE_BYPASS_LICENSE=true bakes a "skip license check" flag into the
-        # dashboard bundle. Without it the app boots into a LicenseGate that
-        # tries to validate against https://blackruby.app — which doesn't
-        # exist yet. Once we deploy a real marketing-api with Stripe, drop
-        # this env var to re-enable license enforcement for customer builds.
+      - name: Build dashboard
+        # License-gate stays ACTIVE for customer builds — VITE_BYPASS_LICENSE
+        # used to be set here as a "temporary" workaround while blackruby.app
+        # wasn't deployed. That meant every paying customer could install +
+        # use the app without entering a license key — instant piracy.
+        #
+        # If you need to test the bundle locally without a license server,
+        # put VITE_BYPASS_LICENSE=true in .env.local — but DO NOT pass it
+        # through the CI environment. The LicenseProvider has its own offline
+        # grace window (96h) so customers don't get kicked out by transient
+        # outages of the validation API.
         env:
-          VITE_BYPASS_LICENSE: 'true'
+          # The signing-secret half of the HMAC pair. Pulled from repo
+          # secrets so customer builds verify license payloads server-side.
+          VITE_LICENSE_VERIFY_KEY: ${{ secrets.LICENSE_VERIFY_KEY }}
+          # Optional override for the validation API. Default in
+          # LicenseProvider is https://blackruby.app — keep this var unset
+          # in CI to use the default once the marketing-api goes live.
+          VITE_LICENSE_API_URL: ${{ secrets.LICENSE_API_URL }}
         run: npm run -w @vinted-system/dashboard build
 
       - name: Stage bundle payload (Node.js + system + Playwright Chromium)

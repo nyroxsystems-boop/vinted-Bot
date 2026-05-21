@@ -14,7 +14,7 @@
 // first time, so silent re-login would loop into a Captcha-failure anyway.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { createLogger, getDb, getSetting, isPaused, withLock } from '@vinted-system/shared';
+import { createLogger, getDb, getSetting, isPaused, withLock, listActiveAccountsFor } from '@vinted-system/shared';
 import { eventBus } from './events.js';
 
 const log = createLogger('session-health');
@@ -23,27 +23,48 @@ let timer: ReturnType<typeof setInterval> | null = null;
 const INTERVAL_MS = 10 * 60 * 1000;
 const VINTED = `http://localhost:${process.env.VINTED_BOT_PORT ?? '4701'}`;
 
-async function probe(): Promise<{ healthy: boolean; status: string; account?: number }> {
+async function probeAccount(accountId: number): Promise<{ healthy: boolean; status: string }> {
   try {
-    const res = await fetch(`${VINTED}/login/status`, {
+    const res = await fetch(`${VINTED}/login/status?account=${accountId}`, {
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return { healthy: false, status: `HTTP ${res.status}` };
-    const body = await res.json() as { session?: { state?: string }; login?: { state?: string }; account_id?: number };
+    const body = await res.json() as { session?: { state?: string }; login?: { state?: string } };
     const sessionState = body.session?.state ?? 'unknown';
     const healthy = sessionState === 'valid' || sessionState === 'logged_in';
-    return { healthy, status: sessionState, account: body.account_id };
+    return { healthy, status: sessionState };
   } catch (err) {
     return { healthy: false, status: err instanceof Error ? err.message : 'fetch failed' };
   }
 }
 
 async function tickInner(): Promise<void> {
-  const result = await probe();
+  // Probe EACH Vinted account separately. The previous version probed only
+  // the current-active account and then flipped `logged_in=0` on ALL Vinted
+  // accounts when ONE was unhealthy — multi-account users woke up to "all
+  // accounts logged out" the moment a single session expired.
+  const accounts = listActiveAccountsFor('vinted');
+  if (accounts.length === 0) return;
   const db = getDb();
+  const unhealthyAccounts: Array<{ id: number; label: string; status: string }> = [];
 
-  if (result.healthy) {
-    // Touch a low-key heartbeat so the dashboard can show "last good check".
+  for (const acc of accounts) {
+    const result = await probeAccount(acc.id);
+    if (result.healthy) {
+      db.prepare(`
+        INSERT INTO settings(key, value) VALUES ('vinted_session_last_ok_' || ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(String(acc.id));
+    } else {
+      log.warn('Vinted session unhealthy', { accountId: acc.id, label: acc.label, status: result.status });
+      // ONLY flip this specific account, not the whole table.
+      db.prepare(`UPDATE vinted_accounts SET logged_in = 0 WHERE id = ?`).run(acc.id);
+      unhealthyAccounts.push({ id: acc.id, label: acc.label, status: result.status });
+    }
+  }
+
+  if (unhealthyAccounts.length === 0) {
+    // All-healthy heartbeat for the dashboard.
     db.prepare(`
       INSERT INTO settings(key, value) VALUES ('vinted_session_last_ok', datetime('now'))
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -51,31 +72,26 @@ async function tickInner(): Promise<void> {
     return;
   }
 
-  // Has the user already been alerted in the last 6h? If so, stay quiet.
-  const lastAlert = getSetting('vinted_session_last_alert');
-  if (lastAlert) {
-    const ageH = (Date.now() - new Date(lastAlert).getTime()) / 3_600_000;
-    if (ageH < 6) {
-      log.debug('Session still unhealthy but recent alert exists', { status: result.status });
-      return;
-    }
-  }
-
-  log.warn('Vinted session unhealthy', result);
-
-  // Mark all Vinted accounts as logged out so downstream bots stop trying.
-  db.prepare(`UPDATE vinted_accounts SET logged_in = 0 WHERE marketplace IN ('vinted', NULL, '') OR marketplace IS NULL`).run();
-
-  db.prepare(`
-    INSERT INTO settings(key, value) VALUES ('vinted_session_last_alert', datetime('now'))
+  // Throttle alerts so the user isn't spammed every 10 min for the same
+  // account. Alert-key is per-account so each account has its own cooldown.
+  const stamp = db.prepare(`
+    INSERT INTO settings(key, value) VALUES (?, datetime('now'))
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run();
-
-  eventBus.publish({
-    type: 'alert',
-    level: 'error',
-    message: `🔒 Vinted-Session ungültig (${result.status}). Bitte \`npm run vinted:login\` ausführen — sonst published/pollt nichts mehr.`,
-  });
+  `);
+  for (const a of unhealthyAccounts) {
+    const alertKey = `vinted_session_last_alert_${a.id}`;
+    const lastAlert = getSetting(alertKey);
+    if (lastAlert) {
+      const ageH = (Date.now() - new Date(lastAlert).getTime()) / 3_600_000;
+      if (ageH < 6) continue;
+    }
+    stamp.run(alertKey);
+    eventBus.publish({
+      type: 'alert',
+      level: 'error',
+      message: `🔒 Vinted-Session ungültig: ${a.label} (#${a.id}, ${a.status}). Im Dashboard erneut einloggen.`,
+    });
+  }
 }
 
 async function tick(): Promise<void> {

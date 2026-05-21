@@ -54,7 +54,12 @@ const INCLUDE = [
   'vinted-bot', 'kleinanzeigen-bot', 'depop-bot', 'mercari-bot',
   'wallapop-bot', 'ebay-bot', 'etsy-bot', 'grailed-bot',
   'fb-marketplace-bot', 'vestiaire-bot', 'whatnot-bot',
-  'cj-service', 'marketing/api',
+  'cj-service',
+  // NOTE: `marketing/api` is INTENTIONALLY NOT included. It runs server-side
+  // on your infrastructure — customers don't need it. Shipping it risks
+  // leaking server-side secrets (STRIPE_SECRET_KEY, LICENSE_SIGNING_SECRET,
+  // webhook secrets) if any .env / config file slipped into the workspace
+  // dir on the build host. Keep it out — period.
   'dashboard/dist',
   // app/package.json carries the version that `tarball_update.rs::read_current_version`
   // reads at runtime — must be in the tarball so post-apply version bumps stick.
@@ -66,6 +71,14 @@ const EXCLUDE_PATTERNS = [
   '*/node_modules', '*/data', '*/playwright-data', '*/dist',
   '*/.git', '*/tmp', '*/_logs',
   '*.db', '*.db-wal', '*.db-shm', '*.bak', '*.log',
+  // CRITICAL: every form of .env file. Without these patterns a release
+  // build on a dev machine (or CI runner that injected secrets) leaks
+  // STRIPE_SECRET_KEY / LICENSE_SIGNING_SECRET / GEMINI_API_KEY / OAUTH
+  // tokens into the public-facing customer tarball.
+  '.env', '.env.*', '*/.env', '*/.env.*',
+  // Common credential-file names that would also leak silently.
+  'credentials.json', '*/credentials.json', 'secrets.json', '*/secrets.json',
+  'service-account.json', '*/service-account.json',
 ];
 
 const { values: args } = parseArgs({

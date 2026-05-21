@@ -79,6 +79,23 @@ const PRICE_IDS: Record<string, string | undefined> = {
 };
 
 const MOCK_MODE = !STRIPE_KEY;
+
+// Hard refuse to boot in production without Stripe. Without this an
+// accidental empty STRIPE_SECRET_KEY (deploy-secret-rotation, .env mis-
+// merge, Vercel-env outage) would auto-flip the API into MOCK_MODE — at
+// which point `/api/checkout` happily issues real lifetime licenses
+// without taking any money. Single-env-var path to game-over.
+if (MOCK_MODE && process.env.NODE_ENV === 'production') {
+  throw new Error(
+    'FATAL: STRIPE_SECRET_KEY missing in production. MOCK_MODE is dev-only — ' +
+    'a misconfigured prod env would issue free licenses without payment. ' +
+    'Set NODE_ENV !== production OR provide STRIPE_SECRET_KEY.',
+  );
+}
+if (MOCK_MODE) {
+  console.warn('[server] MOCK_MODE active — checkout issues free licenses. dev only.');
+}
+
 const stripe = MOCK_MODE ? null : new Stripe(STRIPE_KEY, { apiVersion: '2024-04-10' });
 
 const app = express();

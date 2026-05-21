@@ -74,8 +74,21 @@ const EXCLUDE_DIRS = new Set([
   '_smoke_test', '_crawler', 'tmp', 'playwright-data',
 ]);
 const EXCLUDE_FILES = new Set([
-  '.env', '.env.local', '.env.tmp', '.DS_Store',
+  // SECRETS — never ship .env files. Customer extracts payload locally,
+  // would see your Stripe/Gemini/OAuth keys in plain text.
+  '.env', '.env.local', '.env.tmp', '.env.production', '.env.development',
+  '.DS_Store',
+  // Common credential file names — defense in depth.
+  'credentials.json', 'secrets.json', 'service-account.json',
 ]);
+// Same patterns but for files matched anywhere in the tree (the Set above
+// only matches by basename).
+function shouldExcludeFile(name) {
+  if (EXCLUDE_FILES.has(name)) return true;
+  // Catch `.env.anything` variants.
+  if (name.startsWith('.env.') || name === '.env') return true;
+  return false;
+}
 
 async function copyFiltered(src, dest, baseRelPath = '') {
   // Top-level: ensure dest exists before any copy lands here. Subdirs get
@@ -87,7 +100,7 @@ async function copyFiltered(src, dest, baseRelPath = '') {
     if (e.name.startsWith('._')) continue;  // mac resource forks
     const rel = baseRelPath ? `${baseRelPath}/${e.name}` : e.name;
     if (EXCLUDE_DIRS.has(e.name) || EXCLUDE_DIRS.has(rel)) continue;
-    if (EXCLUDE_FILES.has(e.name)) continue;
+    if (shouldExcludeFile(e.name)) continue;
     const srcPath = path.join(src, e.name);
     const destPath = path.join(dest, e.name);
     if (e.isDirectory()) {
