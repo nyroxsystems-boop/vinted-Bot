@@ -863,24 +863,83 @@ fn user_install_dir() -> Option<PathBuf> {
     }
 }
 
-/// Locate the read-only `resources/` directory shipped inside the installed
-/// app bundle. Tauri places resources next to the executable on Windows and
-/// inside `Contents/Resources/` on macOS.
+/// Locate the read-only resources directory shipped inside the installed
+/// app bundle. Tauri 2 places resources differently per bundler, so we try
+/// multiple candidate locations and accept the first one that actually
+/// contains `<dir>/system/package.json` (with the workspace marker).
+///
+/// Windows (Tauri 2 / WiX & NSIS):
+///   * The destination paths in `tauri.conf.json > bundle.resources` are
+///     relative to the install root next to the exe. So
+///     `"payload/system": "system"` lands at `<install>\system\` — NOT
+///     `<install>\resources\system\` as the old code assumed.
+///   * Some users have reported a `resources\` middle folder depending on
+///     bundler version, so we still try that as a fallback.
+///
+/// macOS:
+///   * Tauri places resources under `Contents/Resources/`. The destination
+///     keys in the config land directly there, so it's `Resources/system/`.
 fn bundled_resources_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
+    eprintln!("[bundled-payload] looking up resources, exe_dir={}", exe_dir.display());
+
+    // Build the list of candidate roots to probe. First match with a
+    // `system/package.json` containing the workspace marker wins.
+    let mut candidates: Vec<PathBuf> = Vec::new();
     #[cfg(windows)]
     {
-        // Windows MSI/NSIS: <install-dir>\Blackruby.exe + <install-dir>\resources\
-        let candidate = exe_dir.join("resources");
-        if candidate.join("system").exists() { return Some(candidate); }
+        // Tauri 2 default — resources land next to the exe with the dest
+        // path appended as-is.
+        candidates.push(exe_dir.to_path_buf());
+        // Legacy / older Tauri layouts that injected a `resources\` prefix.
+        candidates.push(exe_dir.join("resources"));
+        // NSIS sometimes drops the exe into a `bin\` subfolder.
+        if let Some(parent) = exe_dir.parent() {
+            candidates.push(parent.to_path_buf());
+            candidates.push(parent.join("resources"));
+        }
     }
     #[cfg(target_os = "macos")]
     {
         // <App>.app/Contents/MacOS/<exe> → ../Resources/
-        let candidate = exe_dir.parent()?.join("Resources");
-        if candidate.join("system").exists() { return Some(candidate); }
+        if let Some(parent) = exe_dir.parent() {
+            candidates.push(parent.join("Resources"));
+            // Old code path — keep as fallback.
+            candidates.push(parent.join("Resources").join("payload"));
+        }
+        // Some builds put resources directly next to the exe.
+        candidates.push(exe_dir.to_path_buf());
     }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        candidates.push(exe_dir.to_path_buf());
+        candidates.push(exe_dir.join("resources"));
+    }
+
+    for cand in &candidates {
+        let sys = cand.join("system");
+        let pkg = sys.join("package.json");
+        let exists = pkg.exists();
+        eprintln!(
+            "[bundled-payload]   try {:<60} system/package.json={}",
+            cand.display(),
+            if exists { "yes" } else { "no" }
+        );
+        if exists {
+            // Also require the workspace marker so we don't latch onto an
+            // unrelated package.json somewhere on the system.
+            if std::fs::read_to_string(&pkg)
+                .map(|s| s.contains("\"vinted-system\""))
+                .unwrap_or(false)
+            {
+                eprintln!("[bundled-payload]   → using {}", cand.display());
+                return Some(cand.clone());
+            }
+        }
+    }
+
+    eprintln!("[bundled-payload] no candidate contained a vinted-system payload");
     None
 }
 

@@ -320,12 +320,35 @@ pub fn run() {
                 p
             }
             None => {
-                let msg = "Blackruby kann den System-Ordner nicht finden.\n\n\
-                           Setup: Repo nach %USERPROFILE%\\vinted-Bot\\ klonen und Blackruby \
-                           neu starten, oder die Umgebungsvariable VINTED_SYSTEM_ROOT auf den \
-                           absoluten Pfad zum Repo setzen.\n\n\
-                           Falls du den Fat-Installer (v0.7.0+) erwartet hast: der Build \
-                           war evtl. unvollständig. Bitte neueste Release-Version laden.";
+                // Build a diagnostic suffix that tells us exactly where we
+                // looked and what we found. Without this the bug-report from
+                // a customer is "the dialog appeared" and we're flying blind.
+                let exe = std::env::current_exe().ok();
+                let exe_str = exe.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<unknown>".into());
+                let dir_listing = exe.as_ref()
+                    .and_then(|p| p.parent())
+                    .map(|d| {
+                        let mut entries: Vec<String> = std::fs::read_dir(d).ok()
+                            .into_iter()
+                            .flat_map(|it| it.flatten())
+                            .map(|e| e.file_name().to_string_lossy().into_owned())
+                            .collect();
+                        entries.sort();
+                        entries.truncate(20);
+                        entries.join(", ")
+                    })
+                    .unwrap_or_else(|| "(nicht lesbar)".into());
+                let msg = format!(
+                    "Blackruby kann den System-Ordner nicht finden.\n\n\
+                     Bitte lade die neueste Version von https://blackruby.de/downloads \
+                     herunter und installiere sie erneut.\n\n\
+                     Falls das Problem bleibt, schick uns diese Diagnose:\n\
+                     • App-Pfad: {}\n\
+                     • Inhalt des Ordners: {}\n\n\
+                     Workaround: setze die Umgebungsvariable VINTED_SYSTEM_ROOT \
+                     auf einen geklonten Repo-Pfad und starte Blackruby neu.",
+                    exe_str, dir_listing,
+                );
                 eprintln!("❌ {}", msg);
                 #[cfg(windows)]
                 {
