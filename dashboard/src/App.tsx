@@ -3,7 +3,7 @@ import { Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MarketplaceProvider } from './components/MarketplaceContext';
-import { LicenseProvider } from './license/LicenseProvider';
+import { SessionProvider } from './session/SessionProvider';
 import { Onboarding, shouldShowOnboarding } from './onboarding/Onboarding';
 import { ToastViewport } from './components/Toast';
 import { CommandPalette } from './components/CommandPalette';
@@ -52,12 +52,12 @@ export function App() {
   // VITE_BYPASS_LICENSE=true in .env.local skips the license gate (dev only).
   const bypassLicense = import.meta.env.VITE_BYPASS_LICENSE === 'true';
   return (
-    <LicenseProvider bypass={bypassLicense}>
+    <SessionProvider bypass={bypassLicense}>
       <MarketplaceProvider>
         <AppInner />
         <ToastViewport />
       </MarketplaceProvider>
-    </LicenseProvider>
+    </SessionProvider>
   );
 }
 

@@ -1,6 +1,6 @@
 import { ShieldCheck, KeyRound, Copy, Check, ExternalLink, LogOut } from 'lucide-react';
 import { useState } from 'react';
-import { useLicense } from '../license/LicenseProvider';
+import { useLicense } from '../session/SessionProvider';
 
 export function LicensePanel() {
   const { license, deactivate } = useLicense();
