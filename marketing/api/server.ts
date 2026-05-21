@@ -80,19 +80,20 @@ const PRICE_IDS: Record<string, string | undefined> = {
 
 const MOCK_MODE = !STRIPE_KEY;
 
-// Hard refuse to boot in production without Stripe. Without this an
-// accidental empty STRIPE_SECRET_KEY (deploy-secret-rotation, .env mis-
-// merge, Vercel-env outage) would auto-flip the API into MOCK_MODE — at
-// which point `/api/checkout` happily issues real lifetime licenses
-// without taking any money. Single-env-var path to game-over.
-if (MOCK_MODE && process.env.NODE_ENV === 'production') {
-  throw new Error(
-    'FATAL: STRIPE_SECRET_KEY missing in production. MOCK_MODE is dev-only — ' +
-    'a misconfigured prod env would issue free licenses without payment. ' +
-    'Set NODE_ENV !== production OR provide STRIPE_SECRET_KEY.',
+// In production without Stripe, refuse to issue licenses but allow the server
+// to boot so the marketing site keeps serving. Previously this throw'd on boot,
+// taking down the whole site if the user hadn't filled Stripe keys yet.
+// `CHECKOUT_DISABLED` short-circuits the purchase endpoints with a 503; the
+// game-over scenario (MOCK_MODE quietly issuing free licenses in prod) is
+// still blocked by checking this flag at request time.
+const CHECKOUT_DISABLED = MOCK_MODE && process.env.NODE_ENV === 'production';
+if (CHECKOUT_DISABLED) {
+  console.error(
+    '[server] STRIPE_SECRET_KEY missing in production — checkout endpoints disabled. ' +
+    'Marketing site will serve, but /api/checkout and /api/stripe/webhook return 503 ' +
+    'until Stripe keys are configured.',
   );
-}
-if (MOCK_MODE) {
+} else if (MOCK_MODE) {
   console.warn('[server] MOCK_MODE active — checkout issues free licenses. dev only.');
 }
 
@@ -106,6 +107,9 @@ app.post(
   '/api/stripe/webhook',
   express.raw({ type: 'application/json' }),
   (req: Request, res: Response) => {
+    if (CHECKOUT_DISABLED) {
+      return res.status(503).json({ ok: false, error: 'Stripe not configured on this deployment.' });
+    }
     if (MOCK_MODE) return res.json({ ok: true, mock: true });
     const sig = req.headers['stripe-signature'] as string | undefined;
     // Fail-loud if webhook secret is not configured. Only allow signature-skip
@@ -190,6 +194,9 @@ app.use(express.json());
 
 // ── POST /api/checkout ──────────────────────────────────────────────────────
 app.post('/api/checkout', async (req: Request, res: Response) => {
+  if (CHECKOUT_DISABLED) {
+    return res.status(503).json({ ok: false, error: 'Checkout temporarily unavailable. Stripe not configured on this deployment.' });
+  }
   const { tier, cadence } = req.body as {
     tier: 'starter' | 'hustler' | 'lifetime';
     cadence: 'monthly' | 'yearly' | 'lifetime';
