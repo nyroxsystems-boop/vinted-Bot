@@ -40,6 +40,7 @@ import {
   type AuthedRequest,
 } from './auth.js';
 import { sendLicenseEmail, sendWelcomeEmail } from './mail.js';
+import { OAuth2Client } from 'google-auth-library';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, '../data');
@@ -243,6 +244,58 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 app.post('/api/auth/logout', (_req: Request, res: Response) => {
   clearSessionCookie(res);
   res.json({ ok: true });
+});
+
+// ── Google Sign-In ──────────────────────────────────────────────────────────
+// Client-side Google Identity Services flow: the browser obtains a Google
+// ID token (a JWT signed by Google), POSTs it here, the server verifies the
+// signature against Google's published keys, extracts the email, and either
+// finds or auto-creates the matching user account.
+//
+// Auto-created Google users get a random password hash so they can't be
+// brute-forced — to set a usable password later they'd run a 'forgot
+// password' flow (to be added). Existing email-only accounts merge: if a
+// user previously registered with email+password and the same email signs
+// in with Google, they get logged into the existing account.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? '';
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
+
+app.post('/api/auth/google', async (req: Request, res: Response) => {
+  if (!googleClient) {
+    return res.status(503).json({ ok: false, error: 'google_login_disabled' });
+  }
+  const { credential } = req.body as { credential?: string };
+  if (!credential) return res.status(400).json({ ok: false, error: 'missing_credential' });
+
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email) return res.status(401).json({ ok: false, error: 'no_email' });
+    if (!payload.email_verified) {
+      return res.status(401).json({ ok: false, error: 'email_not_verified_by_google' });
+    }
+    const email = payload.email.toLowerCase();
+
+    let user = findUserByEmail(db, email);
+    if (!user) {
+      // First-time Google login → auto-provision the account. Random hash so
+      // the column is non-null but password-login is effectively disabled
+      // until the user explicitly resets it.
+      const randomHash = await hashPassword(randomBytes(32).toString('hex'));
+      user = createUser(db, email, randomHash);
+      // Fire a welcome mail (best-effort, errors swallowed).
+      sendWelcomeEmail({ to: user.email }).catch((e) => console.error('[google welcome mail]', e));
+    }
+    bindLicensesToUser(db, user.id, user.email);
+    issueSession(res, user, LICENSE_SIGNING_SECRET);
+    res.json({ ok: true, user: { id: user.id, email: user.email } });
+  } catch (e) {
+    console.error('[auth/google] verify failed:', e);
+    res.status(401).json({ ok: false, error: 'invalid_credential' });
+  }
 });
 
 // GET /api/auth/me — returns the current user (or null when not logged in)

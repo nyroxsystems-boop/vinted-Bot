@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Mail, Lock, Sparkles, ShieldCheck, Loader2, type LucideIcon } from 'lucide-react';
+import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { Nav } from '../components/Nav';
 import { Footer } from '../components/Footer';
 import { useAuth } from '../lib/auth';
@@ -88,7 +89,44 @@ export function LoginPage() {
             ))}
           </div>
 
-          <form onSubmit={onSubmit} className="mt-6 space-y-3">
+          {/* Google Sign-In */}
+          <GoogleAuthButton
+            onSuccess={async (credential) => {
+              setBusy(true);
+              setError(null);
+              try {
+                const r = await fetch('/api/auth/google', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ credential }),
+                });
+                const data = await r.json();
+                if (!data.ok) throw new Error(data.error ?? 'google_failed');
+                // Hard reload triggers /api/auth/me revalidation cleanly.
+                window.location.assign(params.get('next') || '/members');
+              } catch (e) {
+                setError(
+                  (e as Error).message === 'google_login_disabled'
+                    ? 'Google-Login ist auf diesem Deployment noch nicht konfiguriert.'
+                    : 'Google-Login fehlgeschlagen. Versuche es mit E-Mail + Passwort.',
+                );
+                setBusy(false);
+              }
+            }}
+            onError={() => setError('Google-Login abgebrochen.')}
+          />
+
+          {/* Divider */}
+          <div className="my-5 flex items-center gap-3">
+            <div className="h-px flex-1 bg-white/10" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              oder mit E-Mail
+            </span>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+
+          <form onSubmit={onSubmit} className="space-y-3">
             <Field
               label="E-Mail"
               icon={Mail}
@@ -147,6 +185,33 @@ export function LoginPage() {
         </div>
       </section>
       <Footer />
+    </div>
+  );
+}
+
+function GoogleAuthButton({
+  onSuccess,
+  onError,
+}: {
+  onSuccess: (credential: string) => void | Promise<void>;
+  onError: () => void;
+}) {
+  // The dark + pill variant blends with our zinc-950 background. The button
+  // rendered by Google is iframe-embedded so we can't fully restyle, but
+  // theme + shape props get us close.
+  return (
+    <div className="mt-6 flex justify-center">
+      <GoogleLogin
+        onSuccess={(resp: CredentialResponse) => {
+          if (resp.credential) void onSuccess(resp.credential);
+        }}
+        onError={onError}
+        theme="filled_black"
+        size="large"
+        shape="pill"
+        text="continue_with"
+        useOneTap={false}
+      />
     </div>
   );
 }
