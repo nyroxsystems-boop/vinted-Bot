@@ -92,16 +92,15 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Build dashboard
-        # PHASE 1 (now): License-gate BYPASSED. No marketing-api is deployed
-        # yet, so a customer who downloads the MSI/DMG has no /api/license/
-        # validate endpoint to talk to. We ship with VITE_BYPASS_LICENSE=true
-        # so the app is usable.
-        #
-        # PHASE 2 (when blackruby.de + Stripe go live): remove the env block
-        # below, add LICENSE_VERIFY_KEY + LICENSE_API_URL to GH Repo Secrets,
-        # tag a new release. Customer builds will then enforce license-keys.
+        # PRODUCTION builds: SessionProvider is enabled, customer logs in
+        # with their blackruby.de account email+password (or Google) at
+        # first launch. The signed payload returned by /api/desktop/session
+        # is HMAC-verified locally against VITE_LICENSE_VERIFY_KEY, which
+        # must match the LICENSE_SIGNING_SECRET env var on the marketing
+        # API (Railway). If the secret isn't set in repo Secrets the
+        # bundle bakes in an empty string and the runtime HMAC verify will
+        # fail — set the secret BEFORE cutting a release.
         env:
-          VITE_BYPASS_LICENSE: 'true'
           VITE_LICENSE_VERIFY_KEY: ${{ secrets.LICENSE_VERIFY_KEY }}
           VITE_LICENSE_API_URL: ${{ secrets.LICENSE_API_URL }}
         run: npm run -w @vinted-system/dashboard build
@@ -151,16 +150,15 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Build dashboard
-        # PHASE 1 (now): License-gate BYPASSED. No marketing-api is deployed
-        # yet, so a customer who downloads the MSI/DMG has no /api/license/
-        # validate endpoint to talk to. We ship with VITE_BYPASS_LICENSE=true
-        # so the app is usable.
-        #
-        # PHASE 2 (when blackruby.de + Stripe go live): remove the env block
-        # below, add LICENSE_VERIFY_KEY + LICENSE_API_URL to GH Repo Secrets,
-        # tag a new release. Customer builds will then enforce license-keys.
+        # PRODUCTION builds: SessionProvider is enabled, customer logs in
+        # with their blackruby.de account email+password (or Google) at
+        # first launch. The signed payload returned by /api/desktop/session
+        # is HMAC-verified locally against VITE_LICENSE_VERIFY_KEY, which
+        # must match the LICENSE_SIGNING_SECRET env var on the marketing
+        # API (Railway). If the secret isn't set in repo Secrets the
+        # bundle bakes in an empty string and the runtime HMAC verify will
+        # fail — set the secret BEFORE cutting a release.
         env:
-          VITE_BYPASS_LICENSE: 'true'
           VITE_LICENSE_VERIFY_KEY: ${{ secrets.LICENSE_VERIFY_KEY }}
           VITE_LICENSE_API_URL: ${{ secrets.LICENSE_API_URL }}
         run: npm run -w @vinted-system/dashboard build

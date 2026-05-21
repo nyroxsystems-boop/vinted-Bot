@@ -68,15 +68,20 @@ export async function verifyLicenseSignature(
   if (!VERIFY_KEY) {
     const mode = (import.meta.env.MODE as string | undefined) ?? 'production';
     if (mode === 'production') {
-      // Hard fail — don't ship an insecure build.
-      throw new Error(
-        '[license] VITE_LICENSE_VERIFY_KEY missing — build is insecure. ' +
-          'Set the env var in CI before building production artifacts.',
-      );
+      // Production build without the secret. Don't throw — that crashes the
+      // React tree and leaves the customer with a blank screen. Instead
+      // fail the verify so the UI shows a clear 'Signature verification
+      // failed' error and the user can re-install / contact support.
+      if (typeof window !== 'undefined' && !(window as unknown as { __brWarnedVerify?: boolean }).__brWarnedVerify) {
+        console.error('[license] VITE_LICENSE_VERIFY_KEY missing in production bundle — every session-verify will fail. Re-build with the secret set in CI.');
+        (window as unknown as { __brWarnedVerify?: boolean }).__brWarnedVerify = true;
+      }
+      return false;
     }
-    // Dev/local build — log loudly (error, not warn) once and degrade.
+    // Dev/local build — log loudly once and degrade to accept anything so
+    // local dev against a fake server still works.
     if (typeof window !== 'undefined' && !(window as unknown as { __brWarnedVerify?: boolean }).__brWarnedVerify) {
-      console.error('[license] VITE_LICENSE_VERIFY_KEY not set — signature verification BYPASSED in dev. This MUST be set for production builds; production builds without it will throw.');
+      console.error('[license] VITE_LICENSE_VERIFY_KEY not set — signature verification BYPASSED in dev.');
       (window as unknown as { __brWarnedVerify?: boolean }).__brWarnedVerify = true;
     }
     return true;
