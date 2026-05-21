@@ -268,7 +268,7 @@ async function processNewSales(): Promise<void> {
     if (!row.cost_eur || row.cost_eur <= 0) {
       log.warn(`Skipping sale #${row.sale_id}: cj_products.cost_eur missing for folder #${row.folder_num}`);
       db.prepare(`
-        INSERT OR IGNORE INTO cj_orders (sale_id, status, error, created_at, updated_at)
+        INSERT OR REPLACE INTO cj_orders (sale_id, status, error, created_at, updated_at)
         VALUES (?, 'failed', ?, datetime('now'), datetime('now'))
       `).run(row.sale_id, `Missing cj_products.cost_eur for folder #${row.folder_num}`);
       continue;
@@ -276,7 +276,7 @@ async function processNewSales(): Promise<void> {
     if (row.cost_eur > maxOrderEur) {
       log.warn(`Skipping sale #${row.sale_id}: CJ cost €${row.cost_eur} exceeds limit €${maxOrderEur}`);
       db.prepare(`
-        INSERT OR IGNORE INTO cj_orders (sale_id, status, error, created_at, updated_at)
+        INSERT OR REPLACE INTO cj_orders (sale_id, status, error, created_at, updated_at)
         VALUES (?, 'failed', ?, datetime('now'), datetime('now'))
       `).run(row.sale_id, `Cost €${row.cost_eur} exceeds limit €${maxOrderEur}`);
       continue;
@@ -316,7 +316,7 @@ async function processNewSales(): Promise<void> {
       if (addrErr) {
         log.warn('Skipping sale — invalid address', { saleId: row.sale_id, reason: addrErr });
         db.prepare(`
-          INSERT OR IGNORE INTO cj_orders (sale_id, status, error, created_at, updated_at)
+          INSERT OR REPLACE INTO cj_orders (sale_id, status, error, created_at, updated_at)
           VALUES (?, 'failed', ?, datetime('now'), datetime('now'))
         `).run(row.sale_id, `Invalid buyer address: ${addrErr}`);
         eventBus.publish({
@@ -345,7 +345,7 @@ async function processNewSales(): Promise<void> {
         if (effective <= 0) {
           log.warn('Skipping sale — out of stock at CJ', { saleId: row.sale_id, pid: row.cj_product_id, vid: row.cj_variant_id });
           db.prepare(`
-            INSERT OR IGNORE INTO cj_orders (sale_id, status, error, created_at, updated_at)
+            INSERT OR REPLACE INTO cj_orders (sale_id, status, error, created_at, updated_at)
             VALUES (?, 'failed', ?, datetime('now'), datetime('now'))
           `).run(row.sale_id, 'Out of stock at CJ');
           eventBus.publish({

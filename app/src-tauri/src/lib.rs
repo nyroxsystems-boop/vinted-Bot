@@ -281,7 +281,15 @@ fn apply_updates(
     state: tauri::State<AppState>,
 ) -> Result<UpdateInfo, String> {
     let sup = state.supervisor.clone();
-    // Stop services BEFORE git pull to release npm/tsx locks cleanly.
+    // Peek first — if there's nothing to apply, don't stop services.
+    // Previous version stop_all'd unconditionally, so clicking "Apply"
+    // when no update existed killed every bot and left them stopped
+    // (the !has_rust_changes branch restarts only on successful update).
+    // Audit Finding #12.
+    let preview = check_for_updates(&sup.repo_root)?;
+    if !preview.available {
+        return Ok(preview);
+    }
     sup.stop_all();
     let result = apply_update(&sup.repo_root, &sup.npm_path, &app)?;
     // If Rust code changed, DON'T restart — user must Cmd+Q and re-run
@@ -335,10 +343,28 @@ pub fn run() {
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    // osascript dialog — same intent on Mac.
+                    // osascript dialog — same intent on Mac. AppleScript
+                    // can't deal with multi-line strings via `\n` — has to
+                    // be `\" & return & \"`. We do a single-line collapse
+                    // before passing to osascript to dodge the issue.
+                    let single_line = msg.replace('\n', " · ").replace('"', "'");
                     let _ = std::process::Command::new("/usr/bin/osascript")
-                        .args(["-e", &format!("display dialog \"{}\" with title \"Blackruby\" buttons {{\"OK\"}}", msg.replace('"', "'"))])
+                        .args(["-e", &format!("display dialog \"{}\" with title \"Blackruby\" buttons {{\"OK\"}}", single_line)])
                         .status();
+                }
+                #[cfg(all(unix, not(target_os = "macos")))]
+                {
+                    // Linux: try zenity first (most distros have it), then
+                    // notify-send, then fall back to a writable temp-file
+                    // log so the user can find a clue in the journal.
+                    let dialog_attempt = std::process::Command::new("zenity")
+                        .args(["--error", "--title=Blackruby", &format!("--text={}", msg)])
+                        .status();
+                    if dialog_attempt.is_err() || !dialog_attempt.as_ref().map(|s| s.success()).unwrap_or(false) {
+                        let _ = std::process::Command::new("notify-send")
+                            .args(["-u", "critical", "Blackruby", msg])
+                            .status();
+                    }
                 }
                 std::process::exit(1);
             }

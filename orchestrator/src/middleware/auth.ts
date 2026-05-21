@@ -34,7 +34,18 @@ const BYPASS_PATHS = [
 ];
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (BYPASS_PATHS.some(p => req.path === p || req.path.startsWith(p + '?'))) {
+  // Path-match: exact OR with-query-string OR (for trailing-slash paths)
+  // any subpath. Previous version only matched exact + with-query, so
+  // `/api/assets/` was on the bypass list but `/api/assets/products/12.jpg`
+  // got 401'd — `<img src=…>` tags can't send Authorization headers so
+  // those URLs MUST be bypassed. Audit Finding #18.
+  if (BYPASS_PATHS.some(p => {
+    if (req.path === p) return true;
+    if (req.path.startsWith(p + '?')) return true;
+    // Path is a trailing-slash bypass-prefix → any subpath is bypassed.
+    if (p.endsWith('/') && req.path.startsWith(p)) return true;
+    return false;
+  })) {
     return next();
   }
   const hdr = req.header('authorization') || '';

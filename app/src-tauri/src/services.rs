@@ -222,14 +222,36 @@ pub fn service_definitions() -> Vec<ServiceDef> {
 fn free_port(port: u16) -> Vec<u32> {
     #[cfg(unix)]
     let pids: Vec<u32> = {
-        let out = match Command::new("/usr/sbin/lsof").arg("-ti").arg(format!(":{}", port)).output() {
-            Ok(o) if o.status.success() => o,
-            _ => return Vec::new(),
-        };
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter_map(|l| l.trim().parse().ok())
-            .collect()
+        // Try lsof at multiple paths. Mac ships it at /usr/sbin/lsof,
+        // Debian/Ubuntu/Alpine at /usr/bin/lsof. Without iteration the
+        // Linux runner silent-fails this entire function → port stays
+        // occupied → spawned tsx crashes → auto-restart loop. Found in
+        // audit Finding #4/#10.
+        const LSOF_PATHS: &[&str] = &["/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"];
+        let mut found = Vec::new();
+        for path in LSOF_PATHS {
+            let out = match Command::new(path).arg("-ti").arg(format!(":{}", port)).output() {
+                Ok(o) if o.status.success() => o,
+                _ => continue,
+            };
+            found = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| l.trim().parse().ok())
+                .collect();
+            break;
+        }
+        // Last-resort fallback: rely on PATH (most CI runners + dev shells).
+        if found.is_empty() {
+            if let Ok(o) = Command::new("lsof").arg("-ti").arg(format!(":{}", port)).output() {
+                if o.status.success() {
+                    found = String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .filter_map(|l| l.trim().parse().ok())
+                        .collect();
+                }
+            }
+        }
+        found
     };
     #[cfg(windows)]
     let pids: Vec<u32> = {
@@ -870,27 +892,63 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
-        let ty = entry.file_type()?;
+        // CRITICAL: do NOT `?`-propagate per-entry errors. A single junction
+        // or unreadable file shouldn't abort the entire payload extract.
+        // Without this, one weird symlink on Windows blocks the fat-installer
+        // from extracting → app shows "no repo root" dialog instead of
+        // booting. Audit Finding #11.
+        let ty = match entry.file_type() {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[copy_dir_recursive] file_type failed for {}: {} — skipping", src_path.display(), e);
+                continue;
+            }
+        };
         if ty.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?;
+            if let Err(e) = copy_dir_recursive(&src_path, &dest_path) {
+                eprintln!("[copy_dir_recursive] dir-copy failed for {}: {} — skipping", src_path.display(), e);
+            }
         } else if ty.is_symlink() {
-            // npm symlinks workspaces inside node_modules — re-create.
+            // npm symlinks workspaces inside node_modules. On Windows these
+            // are Junctions which read_link reports inconsistently across
+            // versions — try-then-fallback rather than crash.
             #[cfg(unix)]
             {
-                let target = std::fs::read_link(&src_path)?;
-                if dest_path.exists() { std::fs::remove_file(&dest_path).ok(); }
-                std::os::unix::fs::symlink(&target, &dest_path)?;
+                if let Ok(target) = std::fs::read_link(&src_path) {
+                    if dest_path.exists() { std::fs::remove_file(&dest_path).ok(); }
+                    if let Err(e) = std::os::unix::fs::symlink(&target, &dest_path) {
+                        eprintln!("[copy_dir_recursive] symlink failed {} -> {}: {} — skipping", src_path.display(), target.display(), e);
+                    }
+                }
             }
             #[cfg(windows)]
             {
-                // Windows: copy contents instead of recreating symlink (no
-                // privileges needed for files).
-                let target = std::fs::read_link(&src_path)?;
-                if target.is_dir() { copy_dir_recursive(&target, &dest_path)?; }
-                else { std::fs::copy(&target, &dest_path)?; }
+                // Junction-resolution: read_link works on most modern setups
+                // but can fail on weird junction types. Try the resolved
+                // target; if read_link itself fails, try canonicalize() as
+                // a fallback before giving up silently on this entry.
+                let target_opt = std::fs::read_link(&src_path).ok()
+                    .or_else(|| std::fs::canonicalize(&src_path).ok());
+                match target_opt {
+                    Some(target) => {
+                        let r = if target.is_dir() {
+                            copy_dir_recursive(&target, &dest_path)
+                        } else {
+                            std::fs::copy(&target, &dest_path).map(|_| ())
+                        };
+                        if let Err(e) = r {
+                            eprintln!("[copy_dir_recursive] junction-copy failed {}: {} — skipping", src_path.display(), e);
+                        }
+                    }
+                    None => {
+                        eprintln!("[copy_dir_recursive] could not resolve junction {} — skipping", src_path.display());
+                    }
+                }
             }
         } else {
-            std::fs::copy(&src_path, &dest_path)?;
+            if let Err(e) = std::fs::copy(&src_path, &dest_path) {
+                eprintln!("[copy_dir_recursive] file-copy failed {}: {} — skipping", src_path.display(), e);
+            }
         }
     }
     Ok(())

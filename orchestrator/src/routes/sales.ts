@@ -242,6 +242,20 @@ salesRouter.post('/confirm-ka', (req, res) => {
     `).get(chat.ad_url ?? '') as { folder_num: number; external_id: string; account_id: number; list_price_eur: number } | undefined;
     if (!ml) return res.status(404).json({ ok: false, error: 'No KA marketplace_listings for this ad — listing not crosslisted yet?' });
 
+    // Idempotency: refuse double-confirm so a duplicate-click in the
+    // dashboard doesn't create two sales (= two CJ orders billed). Audit #17.
+    const synthUrl = chat.ad_url ?? `ka_${ml.external_id}`;
+    const existingSale = db.prepare(`
+      SELECT s.id FROM sales s
+        JOIN listings l ON l.id = s.listing_id
+       WHERE s.marketplace = 'kleinanzeigen' AND l.vinted_url = ?
+       LIMIT 1
+    `).get(synthUrl) as { id: number } | undefined;
+    if (existingSale) {
+      log.info('KA-Sale already confirmed — returning existing', { sale_id: existingSale.id, chat_id });
+      return res.status(200).json({ ok: true, sale_id: existingSale.id, already_confirmed: true });
+    }
+
     const tx = db.transaction(() => {
       let lst = db.prepare(`SELECT id FROM listings WHERE vinted_url = ?`).get(chat.ad_url ?? `ka_${ml.external_id}`) as { id: number } | undefined;
       if (!lst) {

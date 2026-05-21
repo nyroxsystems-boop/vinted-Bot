@@ -127,13 +127,39 @@ log(`  downloaded ${formatBytes((await fsp.stat(nodeArchive)).size)}`);
 
 await fsp.mkdir(NODE_DEST, { recursive: true });
 if (targetOs === 'win') {
-  // Windows: unzip via tar.exe (ships with Windows 10+)
-  execSync(`tar -xf "${nodeArchive}" -C "${NODE_DEST}" --strip-components=1`, { stdio: 'inherit' });
+  // Windows: bsdtar.exe (built into Windows 10+) handles ZIPs but its
+  // --strip-components support is patchy. Extract first, then flatten
+  // the top-level subdir manually.
+  execSync(`tar -xf "${nodeArchive}" -C "${NODE_DEST}"`, { stdio: 'inherit' });
+  // Find the single top-level subdir (e.g. node-v24.11.1-win-x64) and
+  // move its contents up one level.
+  const entries = await fsp.readdir(NODE_DEST);
+  const topLevel = entries.find(e => e.startsWith('node-v'));
+  if (topLevel) {
+    const inner = path.join(NODE_DEST, topLevel);
+    for (const child of await fsp.readdir(inner)) {
+      await fsp.rename(path.join(inner, child), path.join(NODE_DEST, child));
+    }
+    await fsp.rm(inner, { recursive: true, force: true });
+  }
 } else {
-  // Mac/Linux: tar
+  // Mac/Linux: GNU/bsd tar both grok --strip-components for tar.gz.
   execSync(`tar -xzf "${nodeArchive}" -C "${NODE_DEST}" --strip-components=1`, { stdio: 'inherit' });
 }
-log(`  extracted to ${path.relative(REPO_ROOT, NODE_DEST)}`);
+
+// Verify Node was actually extracted — if the strip-components/flatten
+// went sideways the supervisor won't find node and the fat-installer is
+// dead-on-arrival on the customer machine. Audit Finding #20.
+const nodeBinary = targetOs === 'win'
+  ? path.join(NODE_DEST, 'node.exe')
+  : path.join(NODE_DEST, 'bin', 'node');
+if (!fs.existsSync(nodeBinary)) {
+  console.error(`[stage-bundle] FATAL: Node binary not found at expected path: ${nodeBinary}`);
+  console.error(`[stage-bundle] Contents of NODE_DEST:`);
+  for (const e of fs.readdirSync(NODE_DEST)) console.error(`  - ${e}`);
+  process.exit(1);
+}
+log(`  extracted to ${path.relative(REPO_ROOT, NODE_DEST)} (verified: ${path.basename(nodeBinary)} exists)`);
 
 // ── 4. npm install in staged system/ ────────────────────────────────────────
 log('Running npm install (production only) in payload/system…');

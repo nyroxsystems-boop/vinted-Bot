@@ -86,7 +86,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - name: Install deps
         run: npm install --no-audit --no-fund
@@ -118,8 +118,16 @@ jobs:
         # ~1 GB of staged content — most of the build time goes here.
         run: node scripts/stage-bundle.mjs --os=mac
 
-      - name: Build Tauri DMG (universal)
-        run: npm run -w @vinted-system/app tauri:build:mac
+      - name: Build Tauri DMG (native arch only — Apple Silicon)
+        # Universal builds (lipo-fuse arm64 + x64) require running stage-bundle
+        # TWICE — once per arch — because native modules (better-sqlite3, sharp)
+        # compile per-arch and can't be lipo'd post-hoc. We pick arm-only for
+        # now since macos-latest runners are arm64. Intel Mac users see a
+        # smaller market and can use Rosetta or a manual cross-build.
+        # Audit Finding #15.
+        env:
+          BLACKRUBY_RELEASE_PUBKEY: ${{ secrets.RELEASE_PUBKEY }}
+        run: npm run -w @vinted-system/app tauri:build:mac:arm
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -176,6 +184,8 @@ jobs:
         run: node scripts/stage-bundle.mjs --os=win
 
       - name: Build Tauri Win MSI + NSIS
+        env:
+          BLACKRUBY_RELEASE_PUBKEY: ${{ secrets.RELEASE_PUBKEY }}
         run: npm run -w @vinted-system/app tauri:build:win
 
       - name: Upload artifacts
@@ -199,11 +209,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+        with: { node-version: '24' }
 
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # Build the signed source-tarball so in-app updates work for installed
+      # customers (the MSI/DMG is for first-install, the .tar.gz is for
+      # day-to-day updates via the Tauri tarball_update path). Requires two
+      # secrets: RELEASE_SIGNING_KEY (Ed25519 priv, hex pkcs8 DER) and
+      # RELEASE_PUBKEY (hex spki DER). Generate once via:
+      #   node -e 'const k=require("crypto").generateKeyPairSync("ed25519");
+      #            console.log("priv=" + k.privateKey.export({format:"der",type:"pkcs8"}).toString("hex"));
+      #            console.log("pub="  + k.publicKey.export({format:"der",type:"spki"}).toString("hex").slice(-64))'
+      # Then add both to repo secrets.
+      - name: Install minimum deps for release-tarball
+        run: npm install --no-audit --no-fund --omit=dev --ignore-scripts
+
+      - name: Build signed update-tarball
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          BLACKRUBY_RELEASE_PUBKEY: ${{ secrets.RELEASE_PUBKEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ] || [ -z "$BLACKRUBY_RELEASE_PUBKEY" ]; then
+            echo "::warning::RELEASE_SIGNING_KEY or BLACKRUBY_RELEASE_PUBKEY not set — skipping tarball-build. In-app updates will be unavailable for this release."
+            exit 0
+          fi
+          node scripts/release-tarball.mjs --version "${GITHUB_REF_NAME#v}" --notes "Automated release"
 
       - name: Flatten + write manifest
         run: |

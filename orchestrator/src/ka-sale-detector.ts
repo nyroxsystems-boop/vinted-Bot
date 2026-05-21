@@ -224,6 +224,20 @@ async function materializeKaSale(
 ): Promise<void> {
   const db = getDb();
 
+  // CRITICAL guard: without ad_url we'd run the lookup with '' which can
+  // match the FIRST marketplace_listings row whose external_url happens
+  // to be empty/NULL — wrong folder gets marked as sold, CJ order goes
+  // to wrong buyer, cross-sync deactivates wrong listing. Audit Finding #8/#13.
+  if (!chat.ad_url) {
+    log.warn('Skipping KA auto-sale: ad_url is missing — cannot map to folder', { chat: chat.id });
+    eventBus.publish({
+      type: 'alert',
+      level: 'warn',
+      message: `⚠️ KA-Sale für "${chat.ad_title ?? '?'}" erkannt — aber Inserat-URL fehlt im Chat, kann nicht zugeordnet werden. Manuell prüfen.`,
+    });
+    return;
+  }
+
   // Find the folder via marketplace_listings (mapped by ad_url)
   const ml = db.prepare(`
     SELECT folder_num, external_id, account_id, list_price_eur
@@ -232,7 +246,7 @@ async function materializeKaSale(
        SELECT REPLACE(REPLACE(external_url, 'https://www.kleinanzeigen.de/s-anzeige/', ''), '/', '') FROM marketplace_listings WHERE external_url = ?
      ))
      LIMIT 1
-  `).get(chat.ad_url ?? '', chat.ad_url ?? '') as { folder_num: number; external_id: string; account_id: number; list_price_eur: number } | undefined;
+  `).get(chat.ad_url, chat.ad_url) as { folder_num: number; external_id: string; account_id: number; list_price_eur: number } | undefined;
   if (!ml) {
     log.warn('No marketplace_listings row for KA chat — skipping auto-sale', { chat: chat.id, ad_url: chat.ad_url });
     eventBus.publish({
