@@ -163,10 +163,10 @@ function Hero() {
 // instantly and works on a phone without rendering 7 floating cards.
 function MobileHeroGallery() {
   const ITEMS = [
-    { id: 'p1', price: '24,90 €', stat: '380 views' },
-    { id: 'p3', price: '17,50 €', stat: '24 hearts' },
-    { id: 'p5', price: '32,00 €', stat: 'verkauft' },
-    { id: 'p8', price: '14,20 €', stat: '180 views' },
+    { id: 'p2', price: '27,90 €', stat: '380 views' },
+    { id: 'p4', price: '19,50 €', stat: '24 hearts' },
+    { id: 'p3', price: '32,00 €', stat: 'verkauft' },
+    { id: 'p1', price: '17,50 €', stat: '180 views' },
   ];
   return (
     <div className="relative">
@@ -312,9 +312,9 @@ function HeroVisual() {
               </div>
             </div>
 
-            {/* Listing strip — real model photos from the brand pipeline */}
+            {/* Listing strip — real brand-model photos from the user's Vinted account */}
             <div className="mt-3 grid grid-cols-4 gap-2">
-              {['p1', 'p3', 'p5', 'p8'].map((id, i) => (
+              {['p1', 'p2', 'p3', 'p4'].map((id, i) => (
                 <div
                   key={id}
                   className="group relative aspect-[3/4] overflow-hidden rounded-md border border-white/5 bg-zinc-900"
@@ -327,7 +327,7 @@ function HeroVisual() {
                   />
                   {/* Price tag overlay */}
                   <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1 font-mono text-[8px] text-white">
-                    <span>{[24.9, 17.5, 32.0, 14.2][i]?.toFixed(2)} €</span>
+                    <span>{[24.9, 27.9, 32.0, 19.5][i]?.toFixed(2)} €</span>
                     <span className="rounded-sm bg-emerald-500/80 px-1 py-px text-[7px] font-bold uppercase">
                       live
                     </span>

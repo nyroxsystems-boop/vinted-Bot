@@ -379,7 +379,7 @@ function CrosslistVisual() {
           <div className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
             <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
               <img
-                src="/listings/products/p2.jpg"
+                src="/listings/products/p5.jpg"
                 alt="Source listing"
                 loading="lazy"
                 className="absolute inset-0 h-full w-full object-cover"
