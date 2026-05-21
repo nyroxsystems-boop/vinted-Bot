@@ -833,6 +833,111 @@ app.post('/api/license/refund', async (req: Request, res: Response) => {
   }
 });
 
+// ── Desktop session (Tauri app login) ──────────────────────────────────────
+// New login model: instead of pasting a license key, the desktop app takes
+// the user's email + password (same credentials as the member-space) and
+// gets back a signed session payload describing their subscription status.
+// The app caches that payload + the credentials in OS-level secure storage
+// (macOS Keychain / Windows Credential Manager) and re-validates on a
+// rolling cadence. When the Stripe subscription cancels or expires, the
+// next re-validation returns `member: false` and the app locks itself.
+//
+// POST /api/desktop/session
+//   body: { email, password }
+//   200 → { ok: true, payload: <json>, signature: <hex hmac>, ttl_sec }
+//   401 → { ok: false, error: 'invalid_credentials' }
+//   403 → { ok: false, error: 'no_active_subscription' }
+//
+// The payload is the SOURCE OF TRUTH for the desktop app's gate. The
+// signature is HMAC-SHA256(payload, LICENSE_SIGNING_SECRET) so the app can
+// verify integrity even when offline (signature is checked against the
+// embedded public-half of the secret in the Tauri build).
+app.post('/api/desktop/session', async (req: Request, res: Response) => {
+  const { email, password, machine_id } = req.body as {
+    email?: string;
+    password?: string;
+    machine_id?: string;
+  };
+  if (!email || !password) return res.status(400).json({ ok: false, error: 'invalid_input' });
+
+  const user = findUserByEmail(db, email);
+  if (!user) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+
+  // Pull licenses bound to this user (or matchable by email).
+  bindLicensesToUser(db, user.id, user.email);
+  const lic = db
+    .prepare(
+      `SELECT key, tier, cadence, status, stripe_sub, expires_at
+         FROM licenses
+        WHERE (user_id = ? OR email = ?) AND status IN ('active','cancelled')
+        ORDER BY (status='active') DESC, issued_at DESC
+        LIMIT 1`,
+    )
+    .get(user.id, user.email) as
+      | { key: string; tier: string; cadence: string; status: string; stripe_sub: string | null; expires_at: string | null }
+      | undefined;
+
+  // Optional live Stripe check — keeps us honest if a webhook was missed.
+  let effectiveStatus: 'active' | 'cancelled' | 'expired' = (lic?.status as never) ?? 'expired';
+  let effectiveExpiresAt: string | null = lic?.expires_at ?? null;
+  if (!MOCK_MODE && stripe && lic?.stripe_sub) {
+    try {
+      const sub = await stripe.subscriptions.retrieve(lic.stripe_sub);
+      const live: ReadonlyArray<Stripe.Subscription.Status> = ['active', 'trialing'];
+      effectiveStatus = live.includes(sub.status) ? 'active' : 'cancelled';
+      effectiveExpiresAt = sub.current_period_end
+        ? new Date(sub.current_period_end * 1000).toISOString()
+        : effectiveExpiresAt;
+      db.prepare(`UPDATE licenses SET status = ?, expires_at = COALESCE(?, expires_at) WHERE stripe_sub = ?`)
+        .run(effectiveStatus, effectiveExpiresAt, lic.stripe_sub);
+    } catch (e) {
+      console.warn('[desktop/session] stripe lookup failed, falling back to DB:', e);
+    }
+  }
+
+  // 'member' is the single boolean the app cares about. cancelled-but-not-yet-
+  // expired keeps the customer running until expires_at (paid through period).
+  const now = new Date();
+  const member =
+    effectiveStatus === 'active' ||
+    (effectiveStatus === 'cancelled' && effectiveExpiresAt && new Date(effectiveExpiresAt) > now);
+
+  if (!lic) {
+    return res.status(403).json({ ok: false, error: 'no_subscription', user: { id: user.id, email: user.email } });
+  }
+
+  const payload = {
+    user_id: user.id,
+    email: user.email,
+    tier: lic.tier,
+    status: effectiveStatus,
+    member,
+    expires_at: effectiveExpiresAt,
+    machine_id: machine_id ?? null,
+    issued_at: now.toISOString(),
+  };
+  const payloadStr = JSON.stringify(payload);
+  const signature = createHmac('sha256', LICENSE_SIGNING_SECRET).update(payloadStr).digest('hex');
+
+  res.json({
+    ok: true,
+    payload: payloadStr,
+    signature,
+    ttl_sec: 60 * 60 * 6, // 6h — app re-validates every 6 hours when online
+  });
+});
+
+// POST /api/desktop/refresh — same shape, used by the app on a schedule.
+// Identical to /api/desktop/session for now (kept distinct so we can add
+// device-fingerprint enforcement here later without breaking the login flow).
+app.post('/api/desktop/refresh', (req: Request, _res: Response, next) => {
+  // Just forward to the session handler — the app sends the same body shape.
+  req.url = '/api/desktop/session';
+  next();
+});
+
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ ok: true, mock: MOCK_MODE }));
 
