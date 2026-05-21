@@ -111,23 +111,26 @@ function Panel({
   bullets?: string[];
 }) {
   return (
-    <Reveal as="article" className="py-16">
+    <Reveal as="article" className="py-6 md:py-16">
       <div
-        className={`container-narrow grid items-center gap-10 md:grid-cols-2 md:gap-16 ${
+        className={`container-narrow grid items-center gap-6 md:grid-cols-2 md:gap-16 ${
           reverse ? 'md:[&>*:first-child]:order-2' : ''
         }`}
       >
-        <div className="space-y-6">
+        <div className="space-y-3 md:space-y-6">
           <span className="eyebrow">{eyebrow}</span>
-          <h3 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl" style={{ letterSpacing: '-0.02em' }}>
+          <h3
+            className="font-display text-2xl font-bold tracking-tight text-white sm:text-4xl"
+            style={{ letterSpacing: '-0.02em' }}
+          >
             {title}
           </h3>
-          <p className="max-w-md text-zinc-400">{body}</p>
+          <p className="max-w-md text-sm leading-relaxed text-zinc-400 md:text-base">{body}</p>
           {bullets && (
-            <ul className="space-y-2">
+            <ul className="space-y-1.5 md:space-y-2">
               {bullets.map((b) => (
-                <li key={b} className="flex items-start gap-2 text-sm text-zinc-300">
-                  <Check size={15} className="mt-0.5 shrink-0 text-emerald-400" />
+                <li key={b} className="flex items-start gap-2 text-[13px] text-zinc-300 md:text-sm">
+                  <Check size={14} className="mt-0.5 shrink-0 text-emerald-400" />
                   <span>{b}</span>
                 </li>
               ))}
@@ -135,8 +138,10 @@ function Panel({
           )}
         </div>
 
-        <div className="relative aspect-[4/3.2] md:aspect-[4/2.8]">
-          {/* Decorative aura behind the window */}
+        {/* Mobile (<md): hide the heavy desktop visualization entirely. Users
+            on TikTok-driven traffic don't need a tiny mock window — they get
+            the bullets above and the proof shots elsewhere. */}
+        <div className="relative hidden aspect-[4/2.8] md:block">
           <div className="absolute inset-0 -m-6 -z-10 rounded-3xl bg-gradient-to-br from-ruby-500/15 via-violet-500/10 to-indigo-500/15 blur-2xl" />
           {visual}
         </div>
@@ -372,12 +377,14 @@ function CrosslistVisual() {
         <div className="col-span-5 space-y-2">
           <div className="text-[9px] font-mono uppercase tracking-wider text-zinc-500">Source listing</div>
           <div className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
-            <div className="relative aspect-[3/4] bg-gradient-to-br from-ruby-500/30 via-violet-500/20 to-indigo-500/30">
-              <svg viewBox="0 0 60 80" className="absolute inset-0 h-full w-full opacity-60">
-                <ellipse cx="30" cy="22" rx="9" ry="9" fill="rgba(255,255,255,0.55)" />
-                <path d="M 10 80 Q 10 45 30 42 Q 50 45 50 80 Z" fill="rgba(255,255,255,0.45)" />
-              </svg>
-              <div className="absolute right-1.5 top-1.5 rounded-md bg-zinc-950/70 px-1.5 py-0.5 font-mono text-[8px] text-white/80 backdrop-blur">
+            <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
+              <img
+                src="/listings/products/p2.jpg"
+                alt="Source listing"
+                loading="lazy"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+              <div className="absolute right-1.5 top-1.5 rounded-md bg-zinc-950/80 px-1.5 py-0.5 font-mono text-[8px] text-white/90 backdrop-blur">
                 item-4982
               </div>
             </div>
@@ -751,17 +758,20 @@ function StatPill({ label, value }: { label: string; value: string }) {
 // ──────────────────────────────────────────────────────────────────────────────
 export function FeatureShowcase() {
   return (
-    <section id="features" className="relative pb-8 pt-24">
+    <section id="features" className="relative pb-8 pt-14 md:pt-24">
       <div className="container-narrow">
         <Reveal>
           <div className="mx-auto max-w-2xl text-center">
             <span className="eyebrow">
               <Activity size={12} /> Im System
             </span>
-            <h2 className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl mt-5" style={{ letterSpacing: '-0.025em' }}>
+            <h2
+              className="font-display mt-5 text-3xl font-bold tracking-tight text-white sm:text-5xl"
+              style={{ letterSpacing: '-0.025em' }}
+            >
               Sechs Module. <span className="gradient-text">Volle Autonomie.</span>
             </h2>
-            <p className="mt-5 text-lg text-zinc-400">
+            <p className="mt-4 text-base text-zinc-400 md:mt-5 md:text-lg">
               Echte Screens aus dem Live-System. Wenn du Blackruby öffnest, sieht
               es genauso aus — nur dass die Zahlen deine sind.
             </p>

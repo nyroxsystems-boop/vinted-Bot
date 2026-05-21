@@ -17,6 +17,7 @@ import { PraxisCases } from '../components/PraxisCases';
 import { ListingsShowcase } from '../components/ListingsShowcase';
 import { FeatureShowcase } from '../components/FeatureShowcase';
 import { Reveal } from '../components/Reveal';
+import { MobileStickyCta, MobileProofStrip, MobileQuickPitch } from '../components/MobileConversion';
 
 const MARKETPLACES = [
   'Vinted', 'Kleinanzeigen', 'eBay-DE', 'eBay-UK', 'Depop', 'Mercari',
@@ -64,7 +65,9 @@ export function LandingPage() {
     <div className="min-h-screen">
       <Nav />
       <Hero />
+      <MobileQuickPitch />
       <ListingsShowcase />
+      <MobileProofStrip />
       <LogoStrip />
       <Stats />
       <ProfitCalculator />
@@ -75,6 +78,7 @@ export function LandingPage() {
       <FaqSection />
       <CtaBanner />
       <Footer />
+      <MobileStickyCta />
     </div>
   );
 }
@@ -134,14 +138,68 @@ function Hero() {
           <span className="flex items-center gap-1.5"><Lock size={13} /> 100% lokal</span>
         </div>
 
+        {/* Desktop: layered dashboard visual */}
         <div
-          className="mt-16 w-full max-w-5xl animate-fade-up"
+          className="mt-16 hidden w-full max-w-5xl animate-fade-up md:block"
           style={{ animationDelay: '420ms' }}
         >
           <HeroVisual />
         </div>
+
+        {/* Mobile: real product gallery (denser, faster, conversion-first) */}
+        <div
+          className="mt-12 w-full max-w-md animate-fade-up md:hidden"
+          style={{ animationDelay: '420ms' }}
+        >
+          <MobileHeroGallery />
+        </div>
       </div>
     </section>
+  );
+}
+
+// MobileHeroGallery — full-bleed 2x2 grid of real listings, perfect for
+// TikTok-driven traffic. Conveys "this is a real seller's account"
+// instantly and works on a phone without rendering 7 floating cards.
+function MobileHeroGallery() {
+  const ITEMS = [
+    { id: 'p1', price: '24,90 €', stat: '380 views' },
+    { id: 'p3', price: '17,50 €', stat: '24 hearts' },
+    { id: 'p5', price: '32,00 €', stat: 'verkauft' },
+    { id: 'p8', price: '14,20 €', stat: '180 views' },
+  ];
+  return (
+    <div className="relative">
+      <div className="absolute inset-0 -m-4 -z-10 rounded-3xl bg-gradient-to-br from-ruby-500/30 via-violet-500/20 to-indigo-500/30 blur-3xl opacity-60" />
+      <div className="grid grid-cols-2 gap-2.5">
+        {ITEMS.map((it, i) => (
+          <div
+            key={it.id}
+            className="relative aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 bg-zinc-900 shadow-xl shadow-black/30"
+          >
+            <img
+              src={`/listings/products/${it.id}.jpg`}
+              alt={`Live-Listing ${i + 1}`}
+              loading={i < 2 ? 'eager' : 'lazy'}
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            <div className="absolute right-1.5 top-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[9px] font-bold text-emerald-200 backdrop-blur">
+              {it.stat}
+            </div>
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/85 via-black/50 to-transparent px-2.5 py-2 font-mono text-[11px] text-white">
+              <span className="font-bold">{it.price}</span>
+              <span className="rounded-sm bg-ruby-500/80 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider">
+                vinted
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center justify-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        Live: 312 Listings · 22 Sales heute · 184 € Umsatz
+      </div>
+    </div>
   );
 }
 
@@ -254,14 +312,26 @@ function HeroVisual() {
               </div>
             </div>
 
-            {/* Listing strip */}
+            {/* Listing strip — real model photos from the brand pipeline */}
             <div className="mt-3 grid grid-cols-4 gap-2">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="aspect-[3/4] overflow-hidden rounded-md border border-white/5 bg-gradient-to-br from-ruby-500/25 via-violet-500/15 to-indigo-500/25">
-                  <svg viewBox="0 0 60 80" className="h-full w-full opacity-60">
-                    <ellipse cx="30" cy="22" rx="7" ry="7" fill="rgba(255,255,255,0.55)" />
-                    <path d="M 12 80 Q 12 45 30 42 Q 48 45 48 80 Z" fill="rgba(255,255,255,0.45)" />
-                  </svg>
+              {['p1', 'p3', 'p5', 'p8'].map((id, i) => (
+                <div
+                  key={id}
+                  className="group relative aspect-[3/4] overflow-hidden rounded-md border border-white/5 bg-zinc-900"
+                >
+                  <img
+                    src={`/listings/products/${id}.jpg`}
+                    alt={`Listing ${i + 1}`}
+                    loading="lazy"
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  {/* Price tag overlay */}
+                  <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1 font-mono text-[8px] text-white">
+                    <span>{[24.9, 17.5, 32.0, 14.2][i]?.toFixed(2)} €</span>
+                    <span className="rounded-sm bg-emerald-500/80 px-1 py-px text-[7px] font-bold uppercase">
+                      live
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
