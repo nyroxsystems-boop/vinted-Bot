@@ -6,7 +6,7 @@ import { Footer } from '../components/Footer';
 interface LicenseInfo {
   ok: true;
   email: string;
-  tier: 'starter' | 'hustler' | 'lifetime';
+  tier: 'starter' | 'hustler';
   key: string;
   expires_at: string | null;
   status: 'active' | 'cancelled' | 'expired';

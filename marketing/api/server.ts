@@ -71,11 +71,8 @@ const LICENSE_SIGNING_SECRET = (() => {
 const PUBLIC_URL = process.env.PUBLIC_URL ?? 'http://localhost:5180';
 
 const PRICE_IDS: Record<string, string | undefined> = {
-  'starter-monthly':  process.env.STRIPE_PRICE_STARTER_MONTHLY,
-  'starter-yearly':   process.env.STRIPE_PRICE_STARTER_YEARLY,
-  'hustler-monthly':  process.env.STRIPE_PRICE_HUSTLER_MONTHLY,
-  'hustler-yearly':   process.env.STRIPE_PRICE_HUSTLER_YEARLY,
-  'lifetime-lifetime': process.env.STRIPE_PRICE_LIFETIME,
+  'starter-monthly': process.env.STRIPE_PRICE_STARTER_MONTHLY,
+  'hustler-monthly': process.env.STRIPE_PRICE_HUSTLER_MONTHLY,
 };
 
 const MOCK_MODE = !STRIPE_KEY;
@@ -197,14 +194,14 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
   if (CHECKOUT_DISABLED) {
     return res.status(503).json({ ok: false, error: 'Checkout temporarily unavailable. Stripe not configured on this deployment.' });
   }
-  const { tier, cadence } = req.body as {
-    tier: 'starter' | 'hustler' | 'lifetime';
-    cadence: 'monthly' | 'yearly' | 'lifetime';
+  const { tier } = req.body as {
+    tier: 'starter' | 'hustler';
   };
-  if (!['starter', 'hustler', 'lifetime'].includes(tier)) {
+  if (!['starter', 'hustler'].includes(tier)) {
     return res.status(400).json({ ok: false, error: 'invalid tier' });
   }
-  const cad = tier === 'lifetime' ? 'lifetime' : cadence;
+  // We currently only sell monthly subscriptions — no yearly, no lifetime.
+  const cad = 'monthly' as const;
 
   if (MOCK_MODE) {
     // Generate a license immediately and return a fake success URL.
@@ -223,11 +220,10 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
   }
 
   const session = await stripe!.checkout.sessions.create({
-    mode: cad === 'lifetime' ? 'payment' : 'subscription',
+    mode: 'subscription',
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${PUBLIC_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${PUBLIC_URL}/pricing`,
-    customer_creation: cad === 'lifetime' ? 'always' : undefined,
     allow_promotion_codes: true,
     // EU MwSt — wir verkaufen B2C an Endverbraucher (Kleinunternehmer-Setup
     // braucht's nicht, alle anderen brauchen es). `automatic_tax` setzt MwSt
@@ -268,8 +264,8 @@ app.get('/api/checkout/result', async (req: Request, res: Response) => {
     const session = await stripe!.checkout.sessions.retrieve(sessionId, {
       expand: ['customer'],
     });
-    const tier = (session.metadata?.tier as 'starter' | 'hustler' | 'lifetime') ?? 'hustler';
-    const cad = (session.metadata?.cadence as 'monthly' | 'yearly' | 'lifetime') ?? 'monthly';
+    const tier = (session.metadata?.tier as 'starter' | 'hustler') ?? 'hustler';
+    const cad = (session.metadata?.cadence as 'monthly') ?? 'monthly';
     const email =
       (typeof session.customer === 'object' && session.customer && 'email' in session.customer
         ? (session.customer.email as string | undefined)
@@ -617,9 +613,7 @@ app.post('/api/license/refund', async (req: Request, res: Response) => {
     // ends the recurring charge but does NOT refund past payments.
     return res.status(410).json({
       ok: false,
-      error: row.cadence === 'lifetime'
-        ? `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Wende dich an support@blackruby.de.`
-        : `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Abo kannst du jederzeit kündigen, aber bereits bezahlte Perioden werden nicht erstattet. Wende dich an support@blackruby.de.`,
+      error: `Refund-Fenster (7 Tage) abgelaufen — Kauf vor ${ageDays} Tagen. Abo kannst du jederzeit kündigen, aber bereits bezahlte Perioden werden nicht erstattet. Wende dich an support@blackruby.de.`,
     });
   }
 
@@ -685,8 +679,8 @@ app.listen(PORT, () => {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
-  const tier = (session.metadata?.tier as 'starter' | 'hustler' | 'lifetime') ?? 'hustler';
-  const cad = (session.metadata?.cadence as 'monthly' | 'yearly' | 'lifetime') ?? 'monthly';
+  const tier = (session.metadata?.tier as 'starter' | 'hustler') ?? 'hustler';
+  const cad = (session.metadata?.cadence as 'monthly') ?? 'monthly';
   const email = session.customer_details?.email ?? null;
   if (!email) return;
   const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id ?? null;
@@ -726,17 +720,16 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
 function issueLicense(args: {
   email: string;
-  tier: 'starter' | 'hustler' | 'lifetime';
-  cadence: 'monthly' | 'yearly' | 'lifetime';
+  tier: 'starter' | 'hustler';
+  cadence: 'monthly';
   stripeCustomer: string | null;
   stripeSub: string | null;
 }) {
   const key = generateKey();
-  const expiresAt =
-    args.cadence === 'lifetime'
-      ? null
-      : new Date(Date.now() + (args.cadence === 'monthly' ? 30 : 365) * 86_400_000)
-          .toISOString();
+  // Monthly subscription — 30-day grace period before re-validation against
+  // Stripe (the recurring webhook keeps expires_at pushed forward on each
+  // successful invoice.payment_succeeded).
+  const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
   db.prepare(
     `INSERT INTO licenses (key, email, tier, cadence, stripe_customer, stripe_sub, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
