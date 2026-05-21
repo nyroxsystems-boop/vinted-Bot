@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::local_update::{plan_reload, rebuild_and_install, emit_progress, ReloadPlan};
-use crate::services::{find_repo_root, InitialState, Supervisor};
+use crate::services::{find_repo_root, prepare_bundled_payload, InitialState, Supervisor};
 use crate::tarball_update::{
     apply_update as apply_tarball, check_update as check_tarball, version_info,
     TarballManifest, VersionInfo,
@@ -294,17 +294,56 @@ fn apply_updates(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let repo_root = match find_repo_root() {
-        Some(p) => p,
-        None => {
-            eprintln!(
-                "❌ Could not locate Vinted-System repo root. Set VINTED_SYSTEM_ROOT env var \
-                 to the absolute path of your Vinted-System folder."
-            );
-            std::process::exit(1);
+    // Resolution order:
+    //   1. Bundled payload (fat-installer) — installer shipped the source as
+    //      a Tauri resource; extract + use the user-writable copy.
+    //   2. find_repo_root() — env var / saved config / parent-walk / well-known
+    //      default. Works for dev installs.
+    //   3. Show a real OS dialog (so the user doesn't see "double-click does
+    //      nothing"); then exit. Previously a silent exit(1) left users
+    //      thinking the app was broken with no diagnostic info.
+    let repo_root = if let Some((sys_dir, _npm, _browsers)) = prepare_bundled_payload() {
+        eprintln!("✓ Using bundled-installer payload at {}", sys_dir.display());
+        sys_dir
+    } else {
+        match find_repo_root() {
+            Some(p) => {
+                eprintln!("✓ Using repo root: {}", p.display());
+                p
+            }
+            None => {
+                let msg = "Blackruby kann den System-Ordner nicht finden.\n\n\
+                           Setup: Repo nach %USERPROFILE%\\vinted-Bot\\ klonen und Blackruby \
+                           neu starten, oder die Umgebungsvariable VINTED_SYSTEM_ROOT auf den \
+                           absoluten Pfad zum Repo setzen.\n\n\
+                           Falls du den Fat-Installer (v0.7.0+) erwartet hast: der Build \
+                           war evtl. unvollständig. Bitte neueste Release-Version laden.";
+                eprintln!("❌ {}", msg);
+                #[cfg(windows)]
+                {
+                    // Show a Windows message box so the user actually sees WHY
+                    // nothing happens — previous behaviour was silent exit.
+                    let wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+                    let title: Vec<u16> = "Blackruby — Setup unvollständig"
+                        .encode_utf16().chain(std::iter::once(0)).collect();
+                    unsafe {
+                        extern "system" {
+                            fn MessageBoxW(hwnd: *mut u8, text: *const u16, caption: *const u16, type_: u32) -> i32;
+                        }
+                        MessageBoxW(std::ptr::null_mut(), wide.as_ptr(), title.as_ptr(), 0x10);
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    // osascript dialog — same intent on Mac.
+                    let _ = std::process::Command::new("/usr/bin/osascript")
+                        .args(["-e", &format!("display dialog \"{}\" with title \"Blackruby\" buttons {{\"OK\"}}", msg.replace('"', "'"))])
+                        .status();
+                }
+                std::process::exit(1);
+            }
         }
     };
-    eprintln!("✓ Using repo root: {}", repo_root.display());
 
     let supervisor = Supervisor::new(repo_root);
 
