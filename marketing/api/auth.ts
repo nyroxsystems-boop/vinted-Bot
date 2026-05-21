@@ -25,11 +25,13 @@ interface UserRow {
   id: number;
   email: string;
   password_hash: string;
+  name: string | null;
+  is_admin: number; // SQLite stores BOOLEAN as 0/1
   created_at: string;
 }
 
 export interface AuthedRequest extends Request {
-  user?: { id: number; email: string };
+  user?: { id: number; email: string; name?: string | null; is_admin?: boolean };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -106,6 +108,33 @@ export function ensureAuthSchema(db: Database.Database) {
     db.exec(`ALTER TABLE licenses ADD COLUMN user_id INTEGER REFERENCES users(id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_licenses_user ON licenses(user_id)`);
     console.log('[auth] migrated licenses table → added user_id column');
+  }
+
+  // users.name + users.is_admin migrations — additive, NULL/0 defaults are
+  // safe for any existing rows. `name` is the display handle used in the
+  // member-area chat; `is_admin` gates future moderator UI.
+  const userCols = db.prepare(`PRAGMA table_info(users)`).all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === 'name')) {
+    db.exec(`ALTER TABLE users ADD COLUMN name TEXT`);
+    console.log('[auth] migrated users table → added name column');
+  }
+  if (!userCols.some((c) => c.name === 'is_admin')) {
+    db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`);
+    console.log('[auth] migrated users table → added is_admin column');
+  }
+
+  // Bootstrap admins: any user whose email appears in ADMIN_EMAILS (comma-
+  // separated env var) gets is_admin=1 set on startup. Idempotent — re-runs
+  // safely. Lets you promote yourself by adding an env-var on Railway
+  // without writing a one-off SQL migration.
+  const adminEmails = (process.env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.length) {
+    const ph = adminEmails.map(() => '?').join(',');
+    const r = db.prepare(`UPDATE users SET is_admin = 1 WHERE email IN (${ph}) AND is_admin = 0`).run(...adminEmails);
+    if (r.changes > 0) console.log(`[auth] promoted ${r.changes} user(s) to admin via ADMIN_EMAILS`);
   }
 }
 
@@ -199,10 +228,11 @@ export function createUser(
   db: Database.Database,
   email: string,
   passwordHash: string,
+  name?: string | null,
 ): UserRow {
   const r = db
-    .prepare(`INSERT INTO users (email, password_hash) VALUES (?, ?)`)
-    .run(email.toLowerCase(), passwordHash);
+    .prepare(`INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)`)
+    .run(email.toLowerCase(), passwordHash, (name ?? null) as string | null);
   return findUserById(db, Number(r.lastInsertRowid))!;
 }
 export function bindLicensesToUser(db: Database.Database, userId: number, email: string) {

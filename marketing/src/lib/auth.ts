@@ -9,6 +9,8 @@ import { useCallback, useEffect, useState } from 'react';
 export interface AuthUser {
   id: number;
   email: string;
+  name?: string | null;
+  is_admin?: boolean;
 }
 
 interface AuthState {
@@ -47,12 +49,12 @@ export function useAuth() {
     return data.user as AuthUser;
   }, [refresh]);
 
-  const register = useCallback(async (email: string, password: string) => {
+  const register = useCallback(async (email: string, password: string, name?: string) => {
     const r = await fetch('/api/auth/register', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, name }),
     });
     const data = await r.json();
     if (!data.ok) throw new Error(data.error ?? 'register_failed');

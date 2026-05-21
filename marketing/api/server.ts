@@ -222,20 +222,25 @@ app.use(express.json());
 app.use(makeAuthMiddleware(LICENSE_SIGNING_SECRET));
 
 // ── Auth routes ─────────────────────────────────────────────────────────────
-// POST /api/auth/register  body: { email, password } → 201 + session cookie
+// POST /api/auth/register  body: { email, password, name? } → 201 + session cookie
 app.post('/api/auth/register', async (req: Request, res: Response) => {
-  const { email, password } = req.body as { email?: string; password?: string };
+  const { email, password, name } = req.body as { email?: string; password?: string; name?: string };
   if (!email || !password || password.length < 8) {
     return res.status(400).json({ ok: false, error: 'invalid_input' });
   }
   const existing = findUserByEmail(db, email);
   if (existing) return res.status(409).json({ ok: false, error: 'email_in_use' });
   const hash = await hashPassword(password);
-  const user = createUser(db, email, hash);
+  // Trim + cap the display name at 40 chars so it fits chat avatars / labels.
+  const cleanName = typeof name === 'string' ? name.trim().slice(0, 40) : null;
+  const user = createUser(db, email, hash, cleanName);
   bindLicensesToUser(db, user.id, user.email);
   issueSession(res, user, LICENSE_SIGNING_SECRET);
   sendWelcomeEmail({ to: user.email }).catch((e) => console.error('[welcome mail]', e));
-  res.status(201).json({ ok: true, user: { id: user.id, email: user.email } });
+  res.status(201).json({
+    ok: true,
+    user: { id: user.id, email: user.email, name: user.name, is_admin: !!user.is_admin },
+  });
 });
 
 // POST /api/auth/login  body: { email, password } → session cookie
@@ -248,7 +253,10 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
   bindLicensesToUser(db, user.id, user.email);
   issueSession(res, user, LICENSE_SIGNING_SECRET);
-  res.json({ ok: true, user: { id: user.id, email: user.email } });
+  res.json({
+    ok: true,
+    user: { id: user.id, email: user.email, name: user.name, is_admin: !!user.is_admin },
+  });
 });
 
 // POST /api/auth/logout
@@ -302,7 +310,10 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
     }
     bindLicensesToUser(db, user.id, user.email);
     issueSession(res, user, LICENSE_SIGNING_SECRET);
-    res.json({ ok: true, user: { id: user.id, email: user.email } });
+    res.json({
+      ok: true,
+      user: { id: user.id, email: user.email, name: user.name, is_admin: !!user.is_admin },
+    });
   } catch (e) {
     console.error('[auth/google] verify failed:', e);
     res.status(401).json({ ok: false, error: 'invalid_credential' });
@@ -310,9 +321,17 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
 });
 
 // GET /api/auth/me — returns the current user (or null when not logged in)
+// We re-read the DB row (rather than echo the JWT) so name/is_admin reflect
+// changes after the cookie was issued (e.g. admin-promotion via ADMIN_EMAILS
+// on next server boot).
 app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
   if (!req.user) return res.json({ ok: true, user: null });
-  res.json({ ok: true, user: { id: req.user.id, email: req.user.email } });
+  const row = findUserByEmail(db, req.user.email);
+  if (!row) return res.json({ ok: true, user: null });
+  res.json({
+    ok: true,
+    user: { id: row.id, email: row.email, name: row.name, is_admin: !!row.is_admin },
+  });
 });
 
 // ── Password reset ─────────────────────────────────────────────────────────
@@ -731,6 +750,40 @@ async function fetchLatestRelease(): Promise<Record<string, unknown> | null> {
       body?: string;
       assets?: Array<{ name: string; browser_download_url: string; size: number }>;
     };
+    // Classify each asset so the Downloads page can render the right
+    // platform-card. We match on filename because GitHub doesn't tag
+    // assets with platform metadata.
+    //
+    // Tagging rules:
+    //   *_aarch64.dmg          → mac-arm64  (Apple Silicon)
+    //   *_x64.dmg / *_universal.dmg → mac-x64   (Intel — we don't ship one yet)
+    //   *-setup.exe (NSIS)     → windows-x64  ← preferred Windows default
+    //   *_x64_*.msi            → windows-x64-msi (alt for IT installs)
+    //   releases.json / sigs   → skipped
+    //
+    // The frontend uses `.find(a => a.platform === 'windows-x64')` so the
+    // first match wins — that's why NSIS must be tagged `windows-x64` and
+    // the MSIs get a separate tag, otherwise an MSI would shadow the .exe.
+    const classify = (name: string): string | null => {
+      const lc = name.toLowerCase();
+      if (lc.endsWith('releases.json') || lc.endsWith('.sig') || lc.endsWith('.sha256') || lc.endsWith('.tar.gz')) return null;
+      if (lc.endsWith('.dmg')) {
+        if (lc.includes('aarch64') || lc.includes('arm64')) return 'mac-arm64';
+        if (lc.includes('universal')) return 'mac-arm64'; // universal works on arm too
+        if (lc.includes('x64') || lc.includes('x86_64') || lc.includes('intel')) return 'mac-x64';
+        return 'mac-arm64'; // unlabelled .dmg → assume arm (CI default)
+      }
+      if (lc.endsWith('-setup.exe') || lc.endsWith('.nsis.exe')) return 'windows-x64';
+      if (lc.endsWith('.exe')) return 'windows-x64';
+      if (lc.endsWith('.msi')) return 'windows-x64-msi';
+      return null;
+    };
+    const fmtSize = (bytes: number): string => {
+      if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 ** 3)).toFixed(1)} GB`;
+      if (bytes >= 1024 * 1024) return `${Math.round(bytes / (1024 ** 2))} MB`;
+      if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+      return `${bytes} B`;
+    };
     const release = {
       version: gh.tag_name.replace(/^v/, ''),
       released_at: gh.published_at,
@@ -740,11 +793,19 @@ async function fetchLatestRelease(): Promise<Record<string, unknown> | null> {
         .filter((s) => s.startsWith('- ') || s.startsWith('* '))
         .map((s) => s.replace(/^[-*]\s+/, ''))
         .slice(0, 8),
-      assets: (gh.assets ?? []).map((a) => ({
-        name: a.name,
-        size: a.size,
-        url: a.browser_download_url,
-      })),
+      assets: (gh.assets ?? [])
+        .map((a) => {
+          const platform = classify(a.name);
+          if (!platform) return null;
+          return {
+            name: a.name,
+            platform,
+            size: fmtSize(a.size),
+            size_bytes: a.size,
+            url: a.browser_download_url,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null),
     };
     _releaseCache = { release, cachedAt: Date.now() };
     return release;
