@@ -28,6 +28,21 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt as WindowsCommandExt;
+
+/// Suppress the cmd.exe / conhost flash window for short-lived Windows
+/// console programs (netstat, taskkill, where, git, npm.cmd …). Without
+/// `CREATE_NO_WINDOW` each spawn blinks a black console window — visible
+/// to the user as "terminals popping up constantly" when the supervisor
+/// is polling ports or restarting workers. Windows-only.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+fn hide_window(cmd: &mut Command) -> &mut Command {
+    cmd.creation_flags(CREATE_NO_WINDOW)
+}
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
@@ -257,7 +272,7 @@ fn free_port(port: u16) -> Vec<u32> {
     let pids: Vec<u32> = {
         // `netstat -ano` lists all sockets with PID. Filter for our port +
         // LISTENING state. The PID is the last whitespace-separated token.
-        let out = match Command::new("netstat").args(["-ano"]).output() {
+        let out = match hide_window(&mut Command::new("netstat")).args(["-ano"]).output() {
             Ok(o) if o.status.success() => o,
             _ => return Vec::new(),
         };
@@ -274,7 +289,7 @@ fn free_port(port: u16) -> Vec<u32> {
         #[cfg(unix)]
         let _ = Command::new("/bin/kill").arg("-9").arg(pid.to_string()).output();
         #[cfg(windows)]
-        let _ = Command::new("taskkill")
+        let _ = hide_window(&mut Command::new("taskkill"))
             .args(["/PID", &pid.to_string(), "/F", "/T"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -629,7 +644,7 @@ impl Supervisor {
                 // canonical "kill the whole tree" idiom is `taskkill /T /F`.
                 //   /T  → kill child processes as well
                 //   /F  → force-terminate (equivalent to SIGKILL)
-                let _ = Command::new("taskkill")
+                let _ = hide_window(&mut Command::new("taskkill"))
                     .args(["/PID", &pid.to_string(), "/T", "/F"])
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -807,7 +822,7 @@ fn resolve_npm_path() -> PathBuf {
         }
     }
     #[cfg(windows)]
-    if let Ok(out) = Command::new("where").arg("npm.cmd").output() {
+    if let Ok(out) = hide_window(&mut Command::new("where")).arg("npm.cmd").output() {
         if out.status.success() {
             // `where` can return multiple paths line-by-line — take the first.
             if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {

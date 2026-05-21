@@ -89,9 +89,15 @@ pub fn apply_update(repo_root: &Path, npm_path: &Path, app: &AppHandle) -> Resul
     run_git(repo_root, &["pull", "--ff-only", "origin", "main"])?;
 
     emit_update(app, "npm-install", "Installiere aktualisierte Dependencies (npm install)…");
-    let npm_status = Command::new(npm_path)
-        .arg("install")
-        .current_dir(repo_root)
+    let mut npm_cmd = Command::new(npm_path);
+    npm_cmd.arg("install").current_dir(repo_root);
+    // Suppress conhost flash on Windows for the long-running npm install.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        npm_cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let npm_status = npm_cmd
         .status()
         .map_err(|e| format!("npm install failed to spawn: {}", e))?;
     if !npm_status.success() {
@@ -113,9 +119,16 @@ pub fn apply_update(repo_root: &Path, npm_path: &Path, app: &AppHandle) -> Resul
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
+    let mut cmd = Command::new("git");
+    cmd.args(args).current_dir(cwd);
+    #[cfg(windows)]
+    {
+        // Hide the conhost window on Windows so git fetches don't blink
+        // a black square every time the update-checker polls.
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd
         .output()
         .map_err(|e| format!("git spawn failed: {}", e))?;
     if !out.status.success() {

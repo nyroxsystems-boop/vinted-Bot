@@ -264,9 +264,17 @@ pub fn apply_update(
         let lock_after = read_file_hash(&repo_root.join("package-lock.json")).ok();
         if lock_before != lock_after {
             emit(app, "installing", 85, "npm install — Dependencies aktualisieren …");
-            let r = Command::new(npm_path)
+            let mut npm_cmd = Command::new(npm_path);
+            npm_cmd
                 .args(["install", "--no-audit", "--no-fund"])
-                .current_dir(repo_root)
+                .current_dir(repo_root);
+            #[cfg(windows)]
+            {
+                // Hide conhost flash during in-app tarball updates.
+                use std::os::windows::process::CommandExt;
+                npm_cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
+            let r = npm_cmd
                 .output()
                 .map_err(|e| format!("npm install spawn: {}", e))?;
             if !r.status.success() {
