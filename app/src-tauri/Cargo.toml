@@ -29,6 +29,13 @@ flate2 = "1"
 tar = "0.4"
 hex = "0.4"
 
+# SQLite read-only helper. Used by the supervisor to hydrate API keys from
+# the orchestrator's settings table into each spawned bot's env, and to gate
+# bot startup on `<marketplace>_enabled = true`. `bundled` links in the
+# amalgamated SQLite source so we don't depend on whatever sqlite version
+# the host has — same behaviour on every CI build.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # Unix signal handling — SIGTERM/SIGINT/SIGHUP cleanup of supervised children.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

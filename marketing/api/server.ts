@@ -124,6 +124,24 @@ const stripe = MOCK_MODE ? null : new Stripe(STRIPE_KEY, { apiVersion: '2024-04-
 const app = express();
 app.use(cors());
 
+// ── Public runtime config ───────────────────────────────────────────────────
+// The marketing site needs a Google OAuth client ID to render the GIS button.
+// We used to bake it in via VITE_GOOGLE_CLIENT_ID at build time, but that
+// required setting a separate Railway env-var (people forgot — symptom:
+// silent failing Google button). The client ID is PUBLIC info (it's
+// embedded in every bundle that uses Google's OAuth widget) so we just
+// expose it directly here and have the marketing site fetch it on boot
+// before mounting the React tree. One source of truth, no build-time wiring.
+app.get('/api/config/public', (_req: Request, res: Response) => {
+  res.json({
+    ok: true,
+    google_client_id: (process.env.GOOGLE_CLIENT_ID ?? '').trim(),
+    // Future-safe: lets the client know which marketplaces / features are
+    // enabled on this deployment without baking env-time decisions in.
+    stripe_mode: MOCK_MODE ? 'mock' : 'live',
+  });
+});
+
 // Stripe webhook needs the raw body — register BEFORE express.json().
 app.post(
   '/api/stripe/webhook',
@@ -1097,6 +1115,41 @@ async function issueDesktopSession(
   | { status: 403; body: { ok: false; error: 'no_subscription'; user: { id: number; email: string } } }
 > {
   bindLicensesToUser(db, user.id, user.email);
+
+  // Admin bypass — users flagged `is_admin = 1` (via ADMIN_EMAILS env var or
+  // a manual UPDATE) get a synthetic active 'hustler' session without a
+  // Stripe row. Keeps internal QA on a real production build painless.
+  const userRow = findUserById(db, user.id);
+  const isAdmin = userRow ? Boolean(userRow.is_admin) : false;
+  if (isAdmin) {
+    const now = new Date();
+    // Expiry one year out so the offline-grace + soft-stale logic in the
+    // desktop don't repeatedly flag the session as cancelled.
+    const expiresAt = new Date(now.getTime() + 365 * 24 * 3600 * 1000).toISOString();
+    const adminPayload = {
+      user_id: user.id,
+      email: user.email,
+      tier: 'hustler' as const,
+      status: 'active' as const,
+      member: true,
+      expires_at: expiresAt,
+      machine_id: machineId,
+      issued_at: now.toISOString(),
+      admin: true,
+    };
+    const adminPayloadStr = JSON.stringify(adminPayload);
+    const adminSig = createHmac('sha256', LICENSE_SIGNING_SECRET).update(adminPayloadStr).digest('hex');
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        payload: adminPayloadStr,
+        signature: adminSig,
+        ttl_sec: 60 * 60 * 6,
+      },
+    };
+  }
+
   const lic = db
     .prepare(
       `SELECT key, tier, cadence, status, stripe_sub, expires_at

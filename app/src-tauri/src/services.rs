@@ -82,6 +82,44 @@ pub struct ServiceDef {
     pub ready_marker: &'static str,
 }
 
+/// Map a service name to the settings.key that must be 'true' for the
+/// supervisor to start it. `None` = always start (core services). Without
+/// this gate, 17 unconfigured marketplace bots crash-loop on first launch
+/// and fill the log buffer with auth-failure noise before the user has
+/// even seen the onboarding wizard.
+///
+/// Defaults if the row is missing:
+///   - "vinted_enabled"        → true   (every customer is here for Vinted)
+///   - "kleinanzeigen_enabled" → true   (already seeded as 'true' in db.ts)
+///   - all others              → false  (opt-in via settings UI)
+fn enabled_setting_for(name: &str) -> Option<&'static str> {
+    match name {
+        "orchestrator" | "cj-service" => None, // always start
+        "vinted-bot"          => Some("vinted_enabled"),
+        "kleinanzeigen-bot"   => Some("kleinanzeigen_enabled"),
+        "mercari-bot"         => Some("mercari_enabled"),
+        "depop-bot"           => Some("depop_enabled"),
+        "wallapop-bot"        => Some("wallapop_enabled"),
+        "ebay-bot"            => Some("ebay_de_enabled"),
+        "etsy-bot"            => Some("etsy_enabled"),
+        "grailed-bot"         => Some("grailed_enabled"),
+        "fb-marketplace-bot"  => Some("fb_marketplace_enabled"),
+        "vestiaire-bot"       => Some("vestiaire_enabled"),
+        "whatnot-bot"         => Some("whatnot_enabled"),
+        "leboncoin-bot"       => Some("leboncoin_enabled"),
+        "marktplaats-bot"     => Some("marktplaats_enabled"),
+        "willhaben-bot"       => Some("willhaben_enabled"),
+        "shopify-bot"         => Some("shopify_enabled"),
+        "woocommerce-bot"     => Some("woocommerce_enabled"),
+        "poshmark-bot"        => Some("poshmark_enabled"),
+        _ => None,
+    }
+}
+
+fn enabled_setting_default_for(name: &str) -> bool {
+    matches!(name, "vinted-bot" | "kleinanzeigen-bot")
+}
+
 pub fn service_definitions() -> Vec<ServiceDef> {
     // In debug (= `tauri dev`) builds each Node service runs via its `dev`
     // script, which uses `tsx watch` and restarts on source-file changes.
@@ -441,6 +479,23 @@ impl Supervisor {
     }
 
     pub fn start_one(self: &Arc<Self>, app: &AppHandle, def: &ServiceDef) {
+        // Settings-gated bots — skip silently if the operator hasn't
+        // opted in. Reports a 'disabled' status so the dashboard can show
+        // "off — enable in settings" rather than "crashed".
+        if !service_is_enabled(&self.repo_root, def.name) {
+            self.update_status(app, def.name, "disabled", None, None, def.http_url);
+            self.record_log(
+                app,
+                def.name,
+                "stdout",
+                &format!(
+                    "Skipped: {} disabled in settings. Enable via dashboard (Settings → Marketplaces).",
+                    def.name,
+                ),
+            );
+            return;
+        }
+
         self.update_status(app, def.name, "starting", None, None, def.http_url);
 
         // Pre-flight: kill any stale process still holding the port.
@@ -461,6 +516,20 @@ impl Supervisor {
             .stderr(Stdio::piped())
             .env("FORCE_COLOR", "0")
             .env("CI", "1"); // make some tools less chatty / non-interactive
+
+        // Hydrate API keys from the settings table so sibling bots see them.
+        // The orchestrator's own process does this on its boot, but each bot
+        // is a separate spawn from this supervisor and so wouldn't inherit
+        // them otherwise. Mapping mirrors orchestrator/src/index.ts
+        // hydrateEnvFromSettings().
+        if let Some(envs) = read_settings_env(&self.repo_root) {
+            for (k, v) in envs {
+                // Don't clobber values the host already set — gives an
+                // explicit env-var the highest priority.
+                if std::env::var_os(&k).is_some_and(|x| !x.is_empty()) { continue; }
+                cmd.env(k, v);
+            }
+        }
 
         // CRITICAL: When the .app/.exe is launched via the OS shell (Finder
         // on Mac, Explorer on Windows), it inherits a minimal PATH that does
@@ -1176,4 +1245,93 @@ fn is_repo_root(p: &Path) -> bool {
         return false;
     };
     s.contains("\"vinted-system\"")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings-table helpers (SQLite, read-only)
+//
+// The supervisor needs to peek at the orchestrator's SQLite DB at spawn time
+// for two things:
+//   1. Hydrate API keys into each bot's env (so e.g. vinted-bot sees
+//      GEMINI_API_KEY even though only the orchestrator runs the
+//      hydrateEnvFromSettings() helper).
+//   2. Decide whether a marketplace bot should be started at all
+//      (`<marketplace>_enabled = 'true'` gate).
+//
+// We use rusqlite with the `bundled` feature so the SQLite library ships
+// inside the binary — no host-version drift. The DB is opened read-only
+// every time (cheap; called once per spawn). If the DB file doesn't exist
+// yet (first launch before orchestrator created it), all helpers return
+// safe defaults so the supervisor still works.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn db_path_for(repo_root: &Path) -> PathBuf {
+    repo_root.join("orchestrator").join("data").join("vinted-system.db")
+}
+
+/// Read the settings table and return the subset relevant for bot env
+/// hydration. Returns None if the DB doesn't exist yet (typical for a
+/// just-extracted fat-installer on first launch).
+pub fn read_settings_env(repo_root: &Path) -> Option<Vec<(String, String)>> {
+    let path = db_path_for(repo_root);
+    if !path.exists() { return None; }
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    // Mapping mirrors orchestrator/src/index.ts hydrateEnvFromSettings().
+    const MAPPING: &[(&str, &str)] = &[
+        ("gemini_api_key",    "GEMINI_API_KEY"),
+        ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+        ("openai_api_key",    "OPENAI_API_KEY"),
+        ("cj_api_key",        "CJ_API_KEY"),
+        ("cj_email",          "CJ_EMAIL"),
+        ("stripe_secret_key", "STRIPE_SECRET_KEY"),
+        ("telegram_bot_token","TELEGRAM_BOT_TOKEN"),
+        ("telegram_chat_id",  "TELEGRAM_CHAT_ID"),
+    ];
+    let mut out = Vec::new();
+    for (setting_key, env_key) in MAPPING {
+        if let Ok(value) = conn.query_row::<String, _, _>(
+            "SELECT value FROM settings WHERE key = ?1",
+            [*setting_key],
+            |r| r.get(0),
+        ) {
+            let v = value.trim().to_string();
+            if !v.is_empty() {
+                out.push((env_key.to_string(), v));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Look up a boolean setting. Returns the parsed value or `default` when
+/// the row is missing / unparseable / the DB doesn't exist yet.
+pub fn read_setting_bool(repo_root: &Path, key: &str, default: bool) -> bool {
+    let path = db_path_for(repo_root);
+    if !path.exists() { return default; }
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else { return default; };
+    let value: Result<String, _> = conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        [key],
+        |r| r.get(0),
+    );
+    match value {
+        Ok(v) => matches!(v.trim().to_lowercase().as_str(), "true" | "1" | "yes" | "on"),
+        Err(_) => default,
+    }
+}
+
+/// True if the supervisor should start `service_name`. Honours the
+/// settings-table gate documented on `enabled_setting_for()`.
+pub fn service_is_enabled(repo_root: &Path, service_name: &str) -> bool {
+    match enabled_setting_for(service_name) {
+        None => true, // always-on core services
+        Some(key) => read_setting_bool(repo_root, key, enabled_setting_default_for(service_name)),
+    }
 }
