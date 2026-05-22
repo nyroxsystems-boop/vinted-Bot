@@ -348,6 +348,12 @@ pub struct Supervisor {
     pub npm_path: PathBuf,
     pub defs: Vec<ServiceDef>,
     pub started: Mutex<bool>,
+    /// Append-only disk log so we can debug "orchestrator never started"
+    /// without relying on the UI being functional. Stored next to the
+    /// extracted bundled-payload (or alongside the repo in dev) — users
+    /// can grab it from %LOCALAPPDATA%\Blackruby\supervisor.log or
+    /// ~/Library/Application Support/Blackruby/supervisor.log.
+    pub log_file: Mutex<Option<std::fs::File>>,
 }
 
 impl Supervisor {
@@ -387,6 +393,29 @@ impl Supervisor {
             log_buffer.insert(d.name.to_string(), VecDeque::with_capacity(LOG_BUFFER_PER_SERVICE));
         }
 
+        // Open the persistent disk-log next to the user-writable install
+        // root. Append mode + create-if-missing so each launch tacks on
+        // to the existing file. Best-effort: a None here just means the
+        // logs stay in-memory (existing buffer + Tauri event), which is
+        // what the dashboard already shows when it works. The file is
+        // the rescue path when the UI itself can't render.
+        let log_file = user_install_dir()
+            .map(|d| d.join("supervisor.log"))
+            .and_then(|path| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .ok()
+            });
+        if let Some(f) = log_file.as_ref().and_then(|f| f.try_clone().ok()) {
+            // Write a session-start marker so multiple launches are
+            // distinguishable in the log.
+            use std::io::Write;
+            let mut f = f;
+            let _ = writeln!(f, "===== supervisor boot {} =====", Utc::now().to_rfc3339());
+        }
+
         Arc::new(Self {
             children: Mutex::new(HashMap::new()),
             statuses: Mutex::new(statuses),
@@ -395,6 +424,7 @@ impl Supervisor {
             npm_path,
             defs,
             started: Mutex::new(false),
+            log_file: Mutex::new(log_file),
         })
     }
 
@@ -537,31 +567,49 @@ impl Supervisor {
         // every grandchild crashes because `node` isn't found. Symptom: app
         // shows 0 children, no orchestrator, no error visible to the user.
         //
-        // Fix: explicitly add the common Node install dirs to PATH so
-        // `tsx → node → orchestrator` chain can resolve.
+        // Fix: prepend (a) the bundled-payload's portable Node dir — which
+        // is the parent of `self.npm_path` and ships inside the installer
+        // — and (b) common host Node install dirs. The bundled dir goes
+        // FIRST because on a fresh Windows machine without any host Node,
+        // it's the only one that actually exists. npm.cmd itself resolves
+        // node via `%~dp0\node.exe` (relative), but `tsx.cmd` and similar
+        // wrappers call `node` unqualified, so PATH still matters.
         let existing_path = std::env::var("PATH").unwrap_or_default();
         let sep = if cfg!(windows) { ";" } else { ":" };
+
+        // (a) bundled Node — derived from npm_path's parent so dev installs
+        // (where npm_path points at host npm) still work without polluting
+        // PATH with a non-existent dir.
+        let bundled_node_dir = self.npm_path.parent().map(|p| p.to_string_lossy().into_owned());
+
+        // (b) host-machine common install locations as fallback.
         #[cfg(unix)]
-        let node_dirs: &[&str] = &[
+        let host_node_dirs: &[&str] = &[
             "/opt/homebrew/bin",                        // Apple Silicon Homebrew
             "/usr/local/bin",                           // Intel Homebrew + nodejs.org installer
             "/opt/homebrew/opt/node/bin",
             "/usr/local/opt/node/bin",
         ];
         #[cfg(windows)]
-        let node_dirs: &[&str] = &[
-            // Default install location of the nodejs.org MSI installer
+        let host_node_dirs: &[&str] = &[
             r"C:\Program Files\nodejs",
             r"C:\Program Files (x86)\nodejs",
-            // nvm-windows default
             r"C:\Users\Public\nodejs",
         ];
-        let augmented_path = node_dirs.iter()
-            .filter(|p| !existing_path.contains(*p))
-            .chain(std::iter::once(&existing_path.as_str()))
-            .copied()
-            .collect::<Vec<_>>()
-            .join(sep);
+
+        let mut path_parts: Vec<String> = Vec::new();
+        if let Some(d) = &bundled_node_dir {
+            if !existing_path.contains(d.as_str()) {
+                path_parts.push(d.clone());
+            }
+        }
+        for p in host_node_dirs {
+            if !existing_path.contains(*p) {
+                path_parts.push((*p).to_string());
+            }
+        }
+        path_parts.push(existing_path.clone());
+        let augmented_path = path_parts.join(sep);
         cmd.env("PATH", augmented_path);
 
         // Windows: hide the console window for each npm child so the user
@@ -793,6 +841,20 @@ impl Supervisor {
                 q.pop_front();
             }
             q.push_back(event.clone());
+        }
+        // Mirror to disk so we can debug even when the dashboard never
+        // reaches a state that surfaces logs.
+        {
+            use std::io::Write;
+            if let Ok(mut guard) = self.log_file.lock() {
+                if let Some(f) = guard.as_mut() {
+                    let _ = writeln!(
+                        f,
+                        "{} [{}/{}] {}",
+                        event.ts, service, stream, line,
+                    );
+                }
+            }
         }
         let _ = app.emit("service-log", event);
     }
