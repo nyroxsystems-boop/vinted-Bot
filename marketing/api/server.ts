@@ -348,14 +348,41 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
 // GET /api/auth/me — returns the current user (or null when not logged in)
 // We re-read the DB row (rather than echo the JWT) so name/is_admin reflect
 // changes after the cookie was issued (e.g. admin-promotion via ADMIN_EMAILS
-// on next server boot).
+// on next server boot). Also surfaces the user's plan-status so the
+// /desktop-link page can show "you have Hustler" vs "no plan yet" without
+// a second round-trip.
 app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
   if (!req.user) return res.json({ ok: true, user: null });
   const row = findUserByEmail(db, req.user.email);
   if (!row) return res.json({ ok: true, user: null });
+
+  // Cheapest licence-status read — same WHERE clause that issueDesktopSession
+  // uses. We don't run the live Stripe check here (that's the expensive path
+  // reserved for desktop session issuance) — the cached DB state is fresh
+  // enough for UI-level decisions.
+  const lic = db
+    .prepare(
+      `SELECT tier, status, expires_at
+         FROM licenses
+        WHERE (user_id = ? OR email = ?) AND status IN ('active','cancelled')
+        ORDER BY (status='active') DESC, issued_at DESC
+        LIMIT 1`,
+    )
+    .get(row.id, row.email) as
+      | { tier: string; status: string; expires_at: string | null }
+      | undefined;
+  const now = new Date();
+  const memberActive =
+    !!lic &&
+    (lic.status === 'active' ||
+      (lic.status === 'cancelled' && lic.expires_at && new Date(lic.expires_at) > now));
+
   res.json({
     ok: true,
     user: { id: row.id, email: row.email, name: row.name, is_admin: !!row.is_admin },
+    plan: lic
+      ? { tier: lic.tier, status: lic.status, expires_at: lic.expires_at, active: memberActive }
+      : { tier: null, status: 'none', expires_at: null, active: false },
   });
 });
 
@@ -1115,40 +1142,6 @@ async function issueDesktopSession(
   | { status: 403; body: { ok: false; error: 'no_subscription'; user: { id: number; email: string } } }
 > {
   bindLicensesToUser(db, user.id, user.email);
-
-  // Admin bypass — users flagged `is_admin = 1` (via ADMIN_EMAILS env var or
-  // a manual UPDATE) get a synthetic active 'hustler' session without a
-  // Stripe row. Keeps internal QA on a real production build painless.
-  const userRow = findUserById(db, user.id);
-  const isAdmin = userRow ? Boolean(userRow.is_admin) : false;
-  if (isAdmin) {
-    const now = new Date();
-    // Expiry one year out so the offline-grace + soft-stale logic in the
-    // desktop don't repeatedly flag the session as cancelled.
-    const expiresAt = new Date(now.getTime() + 365 * 24 * 3600 * 1000).toISOString();
-    const adminPayload = {
-      user_id: user.id,
-      email: user.email,
-      tier: 'hustler' as const,
-      status: 'active' as const,
-      member: true,
-      expires_at: expiresAt,
-      machine_id: machineId,
-      issued_at: now.toISOString(),
-      admin: true,
-    };
-    const adminPayloadStr = JSON.stringify(adminPayload);
-    const adminSig = createHmac('sha256', LICENSE_SIGNING_SECRET).update(adminPayloadStr).digest('hex');
-    return {
-      status: 200,
-      body: {
-        ok: true,
-        payload: adminPayloadStr,
-        signature: adminSig,
-        ttl_sec: 60 * 60 * 6,
-      },
-    };
-  }
 
   const lic = db
     .prepare(

@@ -201,6 +201,36 @@ export function ensureAuthSchema(db: Database.Database) {
       console.log(`[auth] bootstrapped user_id=1 (${firstUser.email}) as admin — no other admins existed`);
     }
   }
+
+  // Owner gets a real Hustler licence (idempotent).
+  // The synthetic admin-bypass payload technically works, but the owner
+  // wants to dog-food the customer experience end-to-end: same licence
+  // row, same Stripe-cadence revalidation path, same UI states as any
+  // paying user. So we grant a permanent Hustler licence to user_id=1
+  // exactly once. If they later complete a real Stripe checkout, the
+  // webhook UPDATE wins via the unique-key clause.
+  //
+  // The licence is yearly-perpetual: `cadence='yearly'`, `expires_at` 100
+  // years out. That avoids the 6h Stripe revalidate path tripping on a
+  // missing subscription. status='active' keeps them logged-in. The key
+  // is deterministic (`OWNER-1`) so a re-run replaces nothing and a
+  // human can spot it instantly in the table.
+  const ownerLic = db.prepare(`SELECT 1 FROM licenses WHERE key = ?`).get('OWNER-1');
+  if (!ownerLic) {
+    const owner = db.prepare(`SELECT id, email FROM users WHERE id = 1`).get() as
+      | { id: number; email: string }
+      | undefined;
+    if (owner) {
+      // 100 years out — effectively perpetual without confusing the
+      // expires_at comparison logic.
+      const farFuture = new Date(Date.now() + 100 * 365 * 24 * 3600 * 1000).toISOString();
+      db.prepare(
+        `INSERT INTO licenses (key, email, tier, cadence, status, expires_at, user_id)
+         VALUES (?, ?, 'hustler', 'yearly', 'active', ?, ?)`,
+      ).run('OWNER-1', owner.email, farFuture, owner.id);
+      console.log(`[auth] granted owner licence (OWNER-1) to user_id=1 (${owner.email})`);
+    }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

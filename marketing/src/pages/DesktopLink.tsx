@@ -18,19 +18,28 @@
 // Tauri can't close another browser's tab anyway.
 
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, AlertTriangle, Loader2, ArrowRight, Monitor } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  CheckCircle2, AlertTriangle, Loader2, ArrowRight, Monitor, Sparkles, CreditCard,
+} from 'lucide-react';
 import { Nav } from '../components/Nav';
 import { Footer } from '../components/Footer';
 import { useAuth } from '../lib/auth';
 
+interface PlanInfo {
+  tier: 'starter' | 'hustler' | null;
+  status: string;
+  active: boolean;
+}
+
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'need-login' }      // not logged in yet — show CTA to /login
-  | { kind: 'confirming' }      // logged in, calling /link-confirm
-  | { kind: 'done' }            // success — desktop will pick it up shortly
-  | { kind: 'expired' }         // token expired or unknown
-  | { kind: 'already-used' }    // token already consumed
+  | { kind: 'need-login' }                     // not logged in yet — show CTA to /login
+  | { kind: 'confirming' }                     // logged in, calling /link-confirm
+  | { kind: 'done'; plan: PlanInfo }           // confirmed; plan info echoed back
+  | { kind: 'no-plan' }                        // logged in, no active subscription
+  | { kind: 'expired' }                        // token expired or unknown
+  | { kind: 'already-used' }                   // token already consumed
   | { kind: 'error'; msg: string };
 
 const HEX_TOKEN = /^[a-f0-9]{32,128}$/i;
@@ -65,6 +74,22 @@ export function DesktopLinkPage() {
     setPhase({ kind: 'confirming' });
     void (async () => {
       try {
+        // First: peek at the user's subscription status. We use the
+        // newly-extended /api/auth/me which echoes the plan info — no
+        // separate dashboard fetch needed. If there's no active plan we
+        // bail out BEFORE confirming the token, because confirming would
+        // burn the token (single-use) and the desktop would just see a
+        // 403 no_subscription anyway. Better UX: show the upgrade path
+        // here in the browser tab the user is already looking at.
+        const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+        const meData = await meRes.json();
+        const plan: PlanInfo = meData?.plan ?? { tier: null, status: 'none', active: false };
+        if (!plan.active) {
+          return setPhase({ kind: 'no-plan' });
+        }
+
+        // Active subscription — confirm the link token so the desktop's
+        // polling picks it up.
         const r = await fetch('/api/desktop/link-confirm', {
           method: 'POST',
           credentials: 'include',
@@ -78,7 +103,7 @@ export function DesktopLinkPage() {
           const data = await r.json().catch(() => ({}));
           return setPhase({ kind: 'error', msg: data.error ?? `Server-Fehler ${r.status}` });
         }
-        setPhase({ kind: 'done' });
+        setPhase({ kind: 'done', plan });
       } catch (e) {
         setPhase({ kind: 'error', msg: (e as Error).message });
       }
@@ -132,9 +157,60 @@ export function DesktopLinkPage() {
             {phase.kind === 'done' && (
               <Body
                 title="Geschafft."
-                subtitle="Du kannst jetzt zurück in die Blackruby-App — die hat sich gerade automatisch eingeloggt. Dieses Browser-Fenster kannst du schließen."
                 icon={<CheckCircle2 size={20} className="text-emerald-300" />}
-              />
+              >
+                <div className="space-y-3">
+                  <p className="text-sm text-zinc-400">
+                    Du kannst jetzt zurück in die Blackruby-App — die hat sich gerade automatisch
+                    eingeloggt. Dieses Browser-Fenster kannst du schließen.
+                  </p>
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5 text-xs">
+                    <Sparkles size={13} className="text-emerald-300" />
+                    <span className="text-zinc-300">
+                      Aktiv:{' '}
+                      <span className="font-semibold text-white">
+                        {phase.plan.tier === 'hustler' ? 'Hustler' : phase.plan.tier === 'starter' ? 'Starter' : 'Plan'}
+                      </span>
+                      {phase.plan.status === 'cancelled' && (
+                        <span className="ml-1 text-amber-300">· läuft am Ende der Periode aus</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </Body>
+            )}
+
+            {phase.kind === 'no-plan' && (
+              <Body
+                title="Noch kein aktives Abo."
+                icon={<AlertTriangle size={18} className="text-amber-300" />}
+                tone="amber"
+              >
+                <div className="space-y-4">
+                  <p className="text-sm leading-relaxed text-amber-100/90">
+                    Wir haben dich erkannt — aber dein Account hat noch keinen aktiven Plan.
+                    Damit die Desktop-App entsperrt wird, brauchst du Starter oder Hustler.
+                  </p>
+                  <div className="grid gap-2.5">
+                    <Link
+                      to="/pricing"
+                      className="btn-primary inline-flex w-full items-center justify-center gap-2"
+                    >
+                      <CreditCard size={14} /> Plan wählen
+                    </Link>
+                    <Link
+                      to="/members"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-xs text-zinc-400 transition hover:border-white/20 hover:text-white"
+                    >
+                      Schon bezahlt? Mein Account ansehen <ArrowRight size={12} />
+                    </Link>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-200/60">
+                    Nach dem Checkout startest du den Login in der App einfach erneut —
+                    der neue Plan wird sofort erkannt.
+                  </p>
+                </div>
+              </Body>
             )}
 
             {phase.kind === 'expired' && (
