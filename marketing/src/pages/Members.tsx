@@ -384,7 +384,7 @@ function LicenseList({ licenses, loading }: { licenses: License[]; loading: bool
         <KeyRound size={32} className="mx-auto text-zinc-600" />
         <h3 className="mt-4 text-lg font-bold text-white">Noch keine Lizenz</h3>
         <p className="mt-1 text-sm text-zinc-400">
-          Hol dir Starter oder Hustler — beide monatlich kündbar.
+          Hol dir Starter oder Pro — beide monatlich kündbar.
         </p>
         <Link to="/pricing" className="btn-primary mx-auto mt-5 text-sm">
           <Sparkles size={14} /> Plan wählen

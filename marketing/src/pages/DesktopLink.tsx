@@ -169,7 +169,7 @@ export function DesktopLinkPage() {
                     <span className="text-zinc-300">
                       Aktiv:{' '}
                       <span className="font-semibold text-white">
-                        {phase.plan.tier === 'hustler' ? 'Hustler' : phase.plan.tier === 'starter' ? 'Starter' : 'Plan'}
+                        {phase.plan.tier === 'hustler' ? 'Pro' : phase.plan.tier === 'starter' ? 'Starter' : 'Plan'}
                       </span>
                       {phase.plan.status === 'cancelled' && (
                         <span className="ml-1 text-amber-300">· läuft am Ende der Periode aus</span>
@@ -189,7 +189,7 @@ export function DesktopLinkPage() {
                 <div className="space-y-4">
                   <p className="text-sm leading-relaxed text-amber-100/90">
                     Wir haben dich erkannt — aber dein Account hat noch keinen aktiven Plan.
-                    Damit die Desktop-App entsperrt wird, brauchst du Starter oder Hustler.
+                    Damit die Desktop-App entsperrt wird, brauchst du Starter oder Pro.
                   </p>
                   <div className="grid gap-2.5">
                     <Link

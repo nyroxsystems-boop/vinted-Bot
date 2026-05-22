@@ -447,7 +447,7 @@ function KeysStep({
           placeholder="AIza••••••••••••••"
         />
         <p className="mt-1 text-xs text-zinc-500">
-          Empfohlen. Free-Tier deckt ~250 Listings/Tag — reicht für die meisten Hustler.
+          Empfohlen. Free-Tier deckt ~250 Listings/Tag — reicht für die meisten Reseller.
         </p>
       </div>
 

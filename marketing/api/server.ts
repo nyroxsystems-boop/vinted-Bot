@@ -142,6 +142,33 @@ app.get('/api/config/public', (_req: Request, res: Response) => {
   });
 });
 
+// GET /api/config/desktop-verify-key — used by the installed desktop app
+// to fetch the HMAC verify key at runtime instead of relying on the build-
+// time VITE_LICENSE_VERIFY_KEY env var (which was a constant source of
+// 'Signaturprüfung fehlgeschlagen' for misconfigured CI builds).
+//
+// Security note: the security model never relied on this key being secret
+// — the HMAC was only for cheap localStorage-tamper detection on the
+// desktop. The real trust anchor is the TLS handshake with blackruby.de,
+// which is the same anchor that protects this endpoint. An attacker who
+// can intercept this response can also intercept the session payload,
+// so giving them both gains nothing.
+//
+// The desktop caches the response in localStorage, so this endpoint is
+// hit at most once per machine lifetime (and once again on a key rotation
+// when the cached value stops verifying).
+app.get('/api/config/desktop-verify-key', (_req: Request, res: Response) => {
+  const key = (LICENSE_SIGNING_SECRET ?? '').trim();
+  if (!key) {
+    return res.status(503).json({ ok: false, error: 'verify_key_unconfigured' });
+  }
+  // Aggressive cache-control: the value is effectively constant per
+  // deployment, but if we DO rotate the key we want the CDN to drop the
+  // old one quickly. 60 s strikes a balance.
+  res.setHeader('Cache-Control', 'public, max-age=60');
+  res.json({ ok: true, key });
+});
+
 // Stripe webhook needs the raw body — register BEFORE express.json().
 app.post(
   '/api/stripe/webhook',

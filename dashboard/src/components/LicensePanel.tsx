@@ -17,7 +17,7 @@ export function LicensePanel() {
     );
   }
 
-  const tierLabel = license.tier === 'starter' ? 'Starter' : license.tier === 'hustler' ? 'Hustler' : 'Lifetime';
+  const tierLabel = license.tier === 'starter' ? 'Starter' : license.tier === 'hustler' ? 'Pro' : 'Lifetime';
 
   return (
     <div className="card space-y-4">

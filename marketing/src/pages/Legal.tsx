@@ -14,7 +14,7 @@ const DOCS: Record<string, { title: string; body: JSX.Element }> = {
         </p>
         <h2>2. Vertragsgegenstand</h2>
         <p>
-          Der Anbieter überlässt dem Nutzer eine zeitlich begrenzte (Starter/Hustler) oder zeitlich
+          Der Anbieter überlässt dem Nutzer eine zeitlich begrenzte (Starter/Pro) oder zeitlich
           unbegrenzte (Lifetime) Lizenz zur Nutzung der Software. Die Lizenz ist nicht übertragbar
           und nicht unterlizenzierbar.
         </p>

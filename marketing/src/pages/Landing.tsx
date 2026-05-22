@@ -558,7 +558,7 @@ function PricingPreview() {
           </Reveal>
           <Reveal delay={120}>
             <PricingTeaser
-              name="Hustler"
+              name="Pro"
               price="199 €"
               cadence="/Monat"
               featured

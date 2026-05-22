@@ -112,7 +112,7 @@ export async function sendLicenseEmail(args: {
   const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://blackruby.de';
   const subject = `Dein Blackruby-Lizenzkey · ${args.tier.toUpperCase()}`;
 
-  const tierLabel = args.tier === 'hustler' ? 'Hustler' : 'Starter';
+  const tierLabel = args.tier === 'hustler' ? 'Pro' : 'Starter';
   const tierBadge = args.tier === 'hustler' ? '#a78bfa' : '#fb7185';
   const html = `
 <!doctype html>

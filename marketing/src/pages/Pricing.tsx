@@ -30,7 +30,7 @@ const TIERS: Tier[] = [
   },
   {
     id: 'hustler',
-    name: 'Hustler',
+    name: 'Pro',
     tagline: 'Für ernsthafte Reseller. Volle Power.',
     monthly: 199,
     featured: true,
