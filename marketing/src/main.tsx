@@ -9,6 +9,7 @@ import { LoginPage } from './pages/Login';
 import { CheckoutSuccessPage } from './pages/CheckoutSuccess';
 import { DownloadsPage } from './pages/Downloads';
 import { LegalPage } from './pages/Legal';
+import { DesktopLinkPage } from './pages/DesktopLink';
 import './styles.css';
 
 // VITE_GOOGLE_CLIENT_ID is the OAuth client ID created at
@@ -29,6 +30,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/members" element={<MembersPage />} />
           <Route path="/success" element={<CheckoutSuccessPage />} />
           <Route path="/downloads" element={<DownloadsPage />} />
+          <Route path="/desktop-link" element={<DesktopLinkPage />} />
           <Route path="/legal/:doc" element={<LegalPage />} />
         </Routes>
       </BrowserRouter>

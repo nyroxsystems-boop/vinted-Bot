@@ -116,6 +116,36 @@ export function ensureAuthSchema(db: Database.Database) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_pair_codes_user ON desktop_pair_codes(user_id, created_at);
+
+    -- Browser-OAuth link tokens. The new "Mit Google anmelden" path opens
+    -- the user's default browser, completes the existing web OAuth flow
+    -- there (where blackruby.de IS an authorised origin), then signals
+    -- back to the desktop via polling. Flow:
+    --
+    --   1. Desktop: generate 32-byte random token, POST /link-init.
+    --   2. Desktop: open https://blackruby.de/desktop-link?token=... in
+    --      the user's default browser via Tauri shell.
+    --   3. Browser page: ensures user is logged in (regular flow incl.
+    --      Google OAuth) → POST /link-confirm with token → token row
+    --      flips to status='confirmed' bound to user_id.
+    --   4. Desktop polls /link-poll every 2 s.
+    --   5. When status='confirmed', poll consumes the token and returns
+    --      the signed desktop-session payload in the same response.
+    --
+    -- A status of 'consumed' lets us serve the response exactly once and
+    -- distinguishes "the user clicked confirm and the desktop already
+    -- picked it up" from "still pending".
+    CREATE TABLE IF NOT EXISTS desktop_link_tokens (
+      token       TEXT PRIMARY KEY,
+      user_id     INTEGER,
+      status      TEXT NOT NULL DEFAULT 'pending', -- pending | confirmed | consumed
+      expires_at  TEXT NOT NULL,
+      confirmed_at TEXT,
+      consumed_at  TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_link_tokens_status ON desktop_link_tokens(status, created_at);
   `);
 
   // Tag the licenses table with user_id if missing — backwards-compatible
@@ -329,6 +359,81 @@ export function consumePairCode(db: Database.Database, code: string): number | n
         RETURNING user_id`,
     )
     .get(upper) as { user_id: number } | undefined;
+  return row?.user_id ?? null;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Browser-OAuth link tokens — see the table comment in ensureAuthSchema for
+// the full flow. Tokens are 32 bytes (256 bits) of cryptographic randomness,
+// hex-encoded so they survive HTTP query strings without escaping. TTL is
+// 10 minutes — long enough for the user to walk through a Google OAuth flow,
+// short enough that an abandoned tab can't be replayed an hour later.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const LINK_TOKEN_TTL_MIN = 10;
+
+export interface LinkTokenRow {
+  token: string;
+  user_id: number | null;
+  status: 'pending' | 'confirmed' | 'consumed';
+  expires_at: string;
+  confirmed_at: string | null;
+  consumed_at: string | null;
+}
+
+/** Insert a new pending link token. The caller (desktop) generates the
+ *  token bytes locally so the secret never leaves the desktop — the
+ *  server just records the fact that "this token is awaiting confirmation". */
+export function startLinkToken(db: Database.Database, token: string): LinkTokenRow {
+  if (!/^[a-f0-9]{32,128}$/i.test(token)) {
+    throw new Error('invalid_link_token');
+  }
+  const expiresAt = new Date(Date.now() + LINK_TOKEN_TTL_MIN * 60_000).toISOString();
+  // INSERT OR IGNORE means re-calling /link-init with the same token is a
+  // no-op rather than an error — handy for nervous-retrying desktop code.
+  db.prepare(
+    `INSERT OR IGNORE INTO desktop_link_tokens (token, status, expires_at) VALUES (?, 'pending', ?)`,
+  ).run(token, expiresAt);
+  return getLinkToken(db, token)!;
+}
+
+export function getLinkToken(db: Database.Database, token: string): LinkTokenRow | null {
+  const row = db.prepare(`SELECT * FROM desktop_link_tokens WHERE token = ?`).get(token) as
+    | LinkTokenRow
+    | undefined;
+  return row ?? null;
+}
+
+/** Bind `userId` to a pending token. Used by the browser-side /link-confirm
+ *  route after the web app has authenticated the user. Returns true if the
+ *  token was pending and is now confirmed, false otherwise. */
+export function confirmLinkToken(db: Database.Database, token: string, userId: number): boolean {
+  const r = db
+    .prepare(
+      `UPDATE desktop_link_tokens
+          SET user_id = ?, status = 'confirmed', confirmed_at = datetime('now')
+        WHERE token = ?
+          AND status = 'pending'
+          AND datetime(expires_at) > datetime('now')`,
+    )
+    .run(userId, token);
+  return r.changes > 0;
+}
+
+/** Consume a confirmed token. Atomic UPDATE-RETURNING: only the first
+ *  desktop poll after confirmation gets the user_id back; later polls and
+ *  hostile replays see status='consumed' and get nothing. */
+export function consumeLinkToken(db: Database.Database, token: string): number | null {
+  const row = db
+    .prepare(
+      `UPDATE desktop_link_tokens
+          SET status = 'consumed', consumed_at = datetime('now')
+        WHERE token = ?
+          AND status = 'confirmed'
+          AND datetime(expires_at) > datetime('now')
+        RETURNING user_id`,
+    )
+    .get(token) as { user_id: number | null } | undefined;
   return row?.user_id ?? null;
 }
 

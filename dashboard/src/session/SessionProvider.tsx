@@ -23,7 +23,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { SessionGate, type LoginResult } from './SessionGate';
+import { SessionGate, type LoginResult, type BrowserLoginHandle } from './SessionGate';
 import { verifyLicenseSignature } from '../license/verify';
 
 const SESSION_API_URL =
@@ -68,6 +68,7 @@ interface SessionCtx {
   license: Session | null;
   activate: (key: string, password?: string) => Promise<LoginResult>;
   activateWithCode: (code: string) => Promise<LoginResult>;
+  startBrowserLogin: () => BrowserLoginHandle;
   deactivate: () => void;
   softStale: boolean;
 }
@@ -76,6 +77,10 @@ const Ctx = createContext<SessionCtx>({
   license: null,
   activate: async () => ({ ok: false, error: 'not initialised' }),
   activateWithCode: async () => ({ ok: false, error: 'not initialised' }),
+  startBrowserLogin: () => ({
+    result: Promise.resolve({ ok: false, error: 'not initialised' } as LoginResult),
+    cancel: () => undefined,
+  }),
   deactivate: () => undefined,
   softStale: false,
 });
@@ -174,6 +179,29 @@ export function SessionProvider({
     return { ok: false, error: res.error, reason: res.reason };
   }
 
+  /**
+   * Browser-OAuth login — opens the user's default browser to
+   * https://blackruby.de/desktop-link?token=<random-hex>, then polls
+   * /api/desktop/link-poll until the browser side confirms. On success
+   * we persist the resulting session exactly like a password login.
+   *
+   * Returns a BrowserLoginHandle so the SessionGate can cancel the poll
+   * if the user clicks abort.
+   */
+  function startBrowserLogin(): BrowserLoginHandle {
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    const result = (async (): Promise<LoginResult> => {
+      const res = await runBrowserLogin(() => cancelled);
+      if (res.ok) {
+        persist(res.session);
+        return { ok: true };
+      }
+      return { ok: false, error: res.error, reason: res.reason };
+    })();
+    return { result, cancel };
+  }
+
   if (!hydrated) return null;
 
   const expired = stored ? sessionExpired(stored) : false;
@@ -184,6 +212,7 @@ export function SessionProvider({
     return (
       <SessionGate
         onLogin={activate}
+        onLoginWithBrowser={startBrowserLogin}
         onLoginWithCode={activateWithCode}
         previousEmail={stored?.email}
         reason={reason}
@@ -197,6 +226,7 @@ export function SessionProvider({
     license: stored ? toSession(stored) : null,
     activate,
     activateWithCode,
+    startBrowserLogin,
     deactivate,
     softStale,
   };
@@ -366,6 +396,134 @@ function getMachineId(): string {
     localStorage.setItem('br_machine_id', id);
   }
   return id;
+}
+
+/**
+ * Browser-OAuth login. Generates a token, registers it with the server,
+ * opens the user's default browser at /desktop-link?token=..., then polls
+ * /api/desktop/link-poll every 2 seconds for up to 10 minutes.
+ *
+ * The cancel callback is checked between every poll so the SessionGate can
+ * abort the flow if the user clicks "abbrechen".
+ */
+async function runBrowserLogin(
+  isCancelled: () => boolean,
+): Promise<
+  | { ok: true; session: StoredSession }
+  | { ok: false; error: string; reason?: LoginFailReason }
+> {
+  // 32 bytes of randomness → 64-char hex. Server requires /^[a-f0-9]{32,128}$/.
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+  // Step 1: register the pending token with the server.
+  try {
+    const r = await fetch(`${SESSION_API_URL}/api/desktop/link-init`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!r.ok) {
+      return { ok: false, error: `Konnte Login-Sitzung nicht starten (${r.status}).` };
+    }
+  } catch (e) {
+    return { ok: false, error: `Server nicht erreichbar: ${(e as Error).message}` };
+  }
+
+  // Step 2: open the browser. In dev (running outside Tauri) we fall back
+  // to window.open; inside Tauri we use the shell plugin so the URL opens
+  // in the user's REAL default browser (Chrome / Safari / Edge) — that's
+  // critical because Google rejects OAuth popups from the Tauri webview.
+  const url = `${SESSION_API_URL}/desktop-link?token=${token}`;
+  try {
+    if (isTauri()) {
+      const shell = await import('@tauri-apps/plugin-shell');
+      await shell.open(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  } catch (e) {
+    return { ok: false, error: `Konnte Browser nicht öffnen: ${(e as Error).message}` };
+  }
+
+  // Step 3: poll. 2 s cadence, max 10 min — matches server-side TTL.
+  const POLL_INTERVAL_MS = 2_000;
+  const MAX_DURATION_MS = 10 * 60_000;
+  const started = Date.now();
+
+  while (!isCancelled() && Date.now() - started < MAX_DURATION_MS) {
+    await sleep(POLL_INTERVAL_MS);
+    if (isCancelled()) break;
+    try {
+      const r = await fetch(`${SESSION_API_URL}/api/desktop/link-poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, machine_id: getMachineId() }),
+      });
+      if (r.status === 202) continue;                              // pending
+      if (r.status === 404) return { ok: false, error: 'Login-Sitzung abgelaufen. Versuch es neu.' };
+      if (r.status === 410) return { ok: false, error: 'Login wurde schon auf einem anderen Gerät benutzt.' };
+      if (r.status === 403) {
+        return { ok: false, error: 'Kein aktives Abo auf diesem Account.', reason: 'no_subscription' };
+      }
+      if (!r.ok) {
+        return { ok: false, error: `Server-Fehler ${r.status}.` };
+      }
+      const data = (await r.json()) as {
+        ok: boolean;
+        payload?: string;
+        signature?: string;
+        error?: string;
+      };
+      if (!data.ok || !data.payload || !data.signature) {
+        return { ok: false, error: data.error ?? 'Ungültige Server-Antwort.' };
+      }
+      const sigOk = await verifyLicenseSignature(data.payload, data.signature);
+      if (!sigOk) return { ok: false, error: 'Signaturprüfung fehlgeschlagen.' };
+      let payloadObj: {
+        email?: string;
+        tier?: 'starter' | 'hustler';
+        status?: 'active' | 'cancelled' | 'expired';
+        member?: boolean;
+        expires_at?: string | null;
+      } = {};
+      try { payloadObj = JSON.parse(data.payload); } catch { /* */ }
+      if (payloadObj.member === false || !payloadObj.email) {
+        return { ok: false, error: 'Kein aktives Abo auf diesem Account.', reason: 'no_subscription' };
+      }
+      return {
+        ok: true,
+        session: {
+          email: payloadObj.email,
+          password: null,           // browser-OAuth — no password stored
+          payload: data.payload,
+          signature: data.signature,
+          tier: payloadObj.tier ?? 'hustler',
+          status: payloadObj.status ?? 'active',
+          expires_at: payloadObj.expires_at ?? null,
+          last_validated_at: new Date().toISOString(),
+        },
+      };
+    } catch (e) {
+      // Transient network error — keep polling. The MAX_DURATION cap stops
+      // us from looping forever if the API is genuinely down.
+      console.warn('[link-poll] transient error:', e);
+    }
+  }
+
+  if (isCancelled()) {
+    return { ok: false, error: 'Abgebrochen.' };
+  }
+  return { ok: false, error: 'Zeitüberschreitung — Login wurde nicht bestätigt.' };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 /**

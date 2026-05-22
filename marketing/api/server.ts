@@ -40,6 +40,10 @@ import {
   clearSessionCookie,
   createPairCode,
   consumePairCode,
+  startLinkToken,
+  getLinkToken,
+  confirmLinkToken,
+  consumeLinkToken,
   type AuthedRequest,
 } from './auth.js';
 import { sendLicenseEmail, sendWelcomeEmail, sendPasswordResetEmail } from './mail.js';
@@ -1231,6 +1235,102 @@ app.post('/api/desktop/pair-complete', async (req: Request, res: Response) => {
     // Should be impossible (FK + cascade) but be defensive.
     return res.status(401).json({ ok: false, error: 'invalid_code' });
   }
+  const result = await issueDesktopSession(
+    req,
+    { id: user.id, email: user.email },
+    machine_id ?? null,
+  );
+  res.status(result.status).json(result.body);
+});
+
+// ── Browser-OAuth link flow ─────────────────────────────────────────────────
+// The "Mit Google anmelden" path in the desktop app — opens the user's
+// default browser to https://blackruby.de/desktop-link?token=…, completes
+// the OAuth flow in the browser (where blackruby.de IS an authorised origin
+// for Google), then signals the result back to the desktop via polling.
+//
+// Three endpoints work as one state machine:
+//   POST /api/desktop/link-init     — desktop registers a pending token
+//   POST /api/desktop/link-confirm  — browser binds it to the logged-in user
+//   POST /api/desktop/link-poll     — desktop drains it for the signed session
+//
+// The token is generated client-side (32 hex bytes from getRandomValues),
+// so the secret never has to leave the desktop machine. The browser only
+// sees the public half via the URL — anyone who steals it can at worst
+// link a token to THEIR OWN account, and the desktop polling will then
+// inherit that account.
+
+// POST /api/desktop/link-init  body: { token }
+//   200 → { ok:true, expires_at, ttl_sec }
+app.post('/api/desktop/link-init', (req: Request, res: Response) => {
+  const { token } = req.body as { token?: string };
+  if (!token || !/^[a-f0-9]{32,128}$/i.test(token)) {
+    return res.status(400).json({ ok: false, error: 'invalid_input' });
+  }
+  try {
+    const row = startLinkToken(db, token);
+    const ttlSec = Math.max(
+      0,
+      Math.floor((new Date(row.expires_at).getTime() - Date.now()) / 1000),
+    );
+    res.json({ ok: true, expires_at: row.expires_at, ttl_sec: ttlSec });
+  } catch (e) {
+    console.warn('[link-init] failed:', e);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// POST /api/desktop/link-confirm  (authed)  body: { token }
+//   200 → { ok:true }
+//   404 → { ok:false, error:'unknown_token' } when the desktop never started it
+app.post('/api/desktop/link-confirm', requireAuth, (req: AuthedRequest, res: Response) => {
+  const { token } = req.body as { token?: string };
+  if (!token || !/^[a-f0-9]{32,128}$/i.test(token)) {
+    return res.status(400).json({ ok: false, error: 'invalid_input' });
+  }
+  const existing = getLinkToken(db, token);
+  if (!existing) return res.status(404).json({ ok: false, error: 'unknown_token' });
+  if (existing.status !== 'pending') {
+    return res.status(409).json({ ok: false, error: 'already_handled' });
+  }
+  const ok = confirmLinkToken(db, token, req.user!.id);
+  if (!ok) return res.status(410).json({ ok: false, error: 'token_expired' });
+  res.json({ ok: true });
+});
+
+// POST /api/desktop/link-poll  body: { token, machine_id? }
+//   200 (status=confirmed)  → { ok:true, payload, signature, ttl_sec }
+//   202 (status=pending)    → { ok:false, status:'pending' }   (keep polling)
+//   404 (unknown / expired) → { ok:false, status:'expired' }   (give up)
+//   410 (already consumed)  → { ok:false, status:'consumed' }  (give up)
+//   403 (no subscription)   → { ok:false, error:'no_subscription', user:{…} }
+//
+// Atomic consume — only the first poll after confirm gets the session;
+// retries and replays see status='consumed' and bounce.
+app.post('/api/desktop/link-poll', async (req: Request, res: Response) => {
+  const { token, machine_id } = req.body as { token?: string; machine_id?: string };
+  if (!token || !/^[a-f0-9]{32,128}$/i.test(token)) {
+    return res.status(400).json({ ok: false, error: 'invalid_input' });
+  }
+  const row = getLinkToken(db, token);
+  if (!row) return res.status(404).json({ ok: false, status: 'expired' });
+  if (new Date(row.expires_at) < new Date()) {
+    return res.status(404).json({ ok: false, status: 'expired' });
+  }
+  if (row.status === 'pending') {
+    return res.status(202).json({ ok: false, status: 'pending' });
+  }
+  if (row.status === 'consumed') {
+    return res.status(410).json({ ok: false, status: 'consumed' });
+  }
+  // status === 'confirmed' — atomically consume + issue session.
+  const userId = consumeLinkToken(db, token);
+  if (userId === null) {
+    // Race: someone else just consumed it.
+    return res.status(410).json({ ok: false, status: 'consumed' });
+  }
+  const user = findUserById(db, userId);
+  if (!user) return res.status(404).json({ ok: false, status: 'expired' });
   const result = await issueDesktopSession(
     req,
     { id: user.id, email: user.email },
