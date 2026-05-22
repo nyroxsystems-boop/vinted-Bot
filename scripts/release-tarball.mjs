@@ -192,6 +192,16 @@ if (args['dry-run']) {
   mkdirSync(dirname(RELEASES_JSON), { recursive: true });
   writeFileSync(RELEASES_JSON, JSON.stringify(manifest, null, 2));
   console.log(`✔ Updated ${RELEASES_JSON}`);
+
+  // ALSO write the manifest next to the tarball itself, so the GH-Release
+  // upload picks it up as an asset. The marketing API on Railway can't see
+  // marketing/data/releases.json (the committed file goes stale immediately
+  // after CI mutates it without pushing) — but it CAN fetch any GH Release
+  // asset by URL. The endpoint /api/releases/tarball reads this file
+  // directly from the GitHub release and serves it back to the desktop.
+  const tarballManifestPath = join(releaseDir, 'tarball-manifest.json');
+  writeFileSync(tarballManifestPath, JSON.stringify(manifest, null, 2));
+  console.log(`✔ Wrote ${tarballManifestPath} (uploaded to GH Release)`);
 }
 
 console.log(`\n✔ Release ${version} ready at ${tarPath}`);

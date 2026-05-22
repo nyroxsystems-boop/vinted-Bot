@@ -924,46 +924,86 @@ app.get('/api/releases/latest', async (_req: Request, res: Response) => {
 // Rust file under app/src-tauri — the dashboard then renders a "neuen
 // Installer ziehen" banner instead of "jetzt aktualisieren", because we
 // can't rewrite a running binary from inside itself.
-app.get('/api/releases/tarball/:current_version', (req: Request, res: Response) => {
+// Tarball-manifest cache. Independent from _releaseCache so a missing or
+// older tarball asset doesn't blow away the working installer-asset cache.
+interface TarballManifest {
+  version: string;
+  released_at: string;
+  notes: string[];
+  tarball: {
+    url: string;
+    sha256: string;
+    signature: string;
+    size: number;
+    requires_native_reinstall?: boolean;
+  };
+}
+
+let _tarballCache: { manifest: TarballManifest | null; cachedAt: number } | null = null;
+
+/** Look at the latest GitHub Release and return the tarball manifest if
+ *  the release contains a `tarball-manifest.json` asset. Returns null when
+ *  no signed tarball has been published (older releases, or builds where
+ *  CI skipped the signing step because secrets were missing). */
+async function fetchTarballManifest(): Promise<TarballManifest | null> {
+  if (_tarballCache && Date.now() - _tarballCache.cachedAt < RELEASE_CACHE_TTL_MS) {
+    return _tarballCache.manifest;
+  }
   try {
-    if (!existsSync(RELEASES_FILE)) return res.status(204).end();
-    const release = JSON.parse(readFileSync(RELEASES_FILE, 'utf8')) as {
-      version: string;
-      released_at: string;
-      notes: string[];
-      tarball?: {
-        url: string;
-        sha256: string;
-        signature: string;
-        requires_native_reinstall?: boolean;
-      };
+    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, {
+      headers: { 'User-Agent': 'blackruby-marketing-api', Accept: 'application/vnd.github+json' },
+    });
+    if (!r.ok) return null;
+    const gh = (await r.json()) as {
+      assets?: Array<{ name: string; browser_download_url: string }>;
     };
-    const current = (req.params.current_version ?? '').trim();
-    if (!current || cmpSemver(release.version, current) <= 0) {
-      return res.json({ ok: true, available: false, current_version: current, latest_version: release.version });
+    const assets = gh.assets ?? [];
+    const manifestAsset = assets.find((a) => a.name === 'tarball-manifest.json');
+    const tarballAsset = assets.find((a) => a.name === 'system.tar.gz');
+    if (!manifestAsset || !tarballAsset) {
+      _tarballCache = { manifest: null, cachedAt: Date.now() };
+      return null;
     }
-    if (!release.tarball) {
-      // We have a newer version but no tarball published yet — user needs to
-      // grab the DMG/EXE manually.
-      return res.json({
-        ok: true,
-        available: true,
-        version: release.version,
-        notes: release.notes,
-        requires_native_reinstall: true,
-        tarball_url: null,
-      });
+    const m = await fetch(manifestAsset.browser_download_url);
+    if (!m.ok) return null;
+    const parsed = (await m.json()) as TarballManifest;
+    // release-tarball.mjs writes the manifest with a marketing-API-relative
+    // tarball URL (PUBLIC_URL/downloads/tarball/...), but Railway has no
+    // local copy of the file. Override with the canonical GH asset URL so
+    // the desktop downloads directly from GitHub's CDN. Keeps the
+    // marketing-API serverless on its data plane.
+    parsed.tarball.url = tarballAsset.browser_download_url;
+    _tarballCache = { manifest: parsed, cachedAt: Date.now() };
+    return parsed;
+  } catch (e) {
+    console.warn('[tarball] GitHub manifest fetch failed', e);
+    return null;
+  }
+}
+
+app.get('/api/releases/tarball/:current_version', async (req: Request, res: Response) => {
+  try {
+    const manifest = await fetchTarballManifest();
+    const current = (req.params.current_version ?? '').trim();
+
+    if (!manifest) {
+      // No signed tarball published yet → fall back to "no update".
+      return res.json({ ok: true, available: false, current_version: current, latest_version: null });
+    }
+
+    if (!current || cmpSemver(manifest.version, current) <= 0) {
+      return res.json({ ok: true, available: false, current_version: current, latest_version: manifest.version });
     }
     return res.json({
       ok: true,
       available: true,
-      version: release.version,
-      released_at: release.released_at,
-      notes: release.notes,
-      tarball_url: release.tarball.url,
-      sha256: release.tarball.sha256,
-      signature: release.tarball.signature,
-      requires_native_reinstall: release.tarball.requires_native_reinstall ?? false,
+      version: manifest.version,
+      released_at: manifest.released_at,
+      notes: manifest.notes,
+      tarball_url: manifest.tarball.url,
+      sha256: manifest.tarball.sha256,
+      signature: manifest.tarball.signature,
+      requires_native_reinstall: manifest.tarball.requires_native_reinstall ?? false,
     });
   } catch (e) {
     console.error('tarball manifest err', e);
