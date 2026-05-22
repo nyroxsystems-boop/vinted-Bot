@@ -442,6 +442,22 @@ impl Supervisor {
             self.repo_root.display()
         ));
 
+        // Self-heal: detect missing workspace junctions and run a one-time
+        // `npm install` if the @vinted-system/* links aren't in node_modules/.
+        // The MSI/NSIS bundler on Windows occasionally strips junctions
+        // created by `npm install` during stage-bundle (or npm itself fails
+        // to create them on the CI runner). Without this check the bundle
+        // ships broken: every spawned bot crashes with ERR_MODULE_NOT_FOUND
+        // for '@vinted-system/shared' and the supervisor enters a 5-second
+        // crash-loop nobody can debug from inside the dashboard. With this
+        // check the first launch repairs itself in 2-5 min and works
+        // afterwards. Re-runs are no-ops once the marker exists.
+        if let Err(e) = self.self_heal_workspaces_if_needed(app) {
+            self.record_log(app, "supervisor", "stderr",
+                &format!("Self-heal npm install FAILED: {}. Backend will not start.", e));
+            return;
+        }
+
         // ── Staged boot ───────────────────────────────────────────────────
         // Starting 10+ npm processes at once spikes CPU, races on port
         // binding, and made earlier versions look "stuck". We boot in three
@@ -506,6 +522,115 @@ impl Supervisor {
             this.record_log(&app2, "supervisor", "stdout",
                 "Staged boot complete. Optional bots (mercari/wallapop/etsy/grailed/fb/vestiaire/whatnot) NOT auto-started — start them from the dashboard when needed.");
         });
+    }
+
+    /// Workspace-junction self-heal. Checks for the @vinted-system/shared
+    /// link under repo_root/node_modules/; if it's missing, runs
+    /// `npm install` synchronously and waits for it to complete BEFORE
+    /// returning. Logs progress every second so the dashboard sees that
+    /// something's happening rather than a frozen "starting…" state.
+    ///
+    /// Re-runs are cheap (no-op) once the marker exists. We only check ONE
+    /// workspace marker to keep the check fast; npm install fixes all of
+    /// them together, so a single sentinel is sufficient.
+    fn self_heal_workspaces_if_needed(self: &Arc<Self>, app: &AppHandle) -> Result<(), String> {
+        let marker = self.repo_root
+            .join("node_modules")
+            .join("@vinted-system")
+            .join("shared");
+        if marker.exists() {
+            return Ok(());
+        }
+
+        self.record_log(app, "supervisor", "stdout",
+            "Workspace-Junctions fehlen — führe einmaliges 'npm install' aus. \
+             Das kann 2-5 Minuten dauern. Das Dashboard bleibt während dieser Zeit \
+             leer; der Orchestrator startet automatisch sobald die Installation \
+             durch ist.");
+        // Status event so the dashboard's services-panel can show
+        // "supervisor: running npm install (this is normal on first launch)".
+        self.update_status(app, "supervisor", "installing", None, None, None);
+
+        let mut cmd = Command::new(&self.npm_path);
+        cmd.arg("install")
+            .arg("--no-audit")
+            .arg("--no-fund")
+            .current_dir(&self.repo_root)
+            .env("CI", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // Same PATH-augmentation as start_one (we need node.exe findable
+        // for npm's lifecycle scripts).
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let bundled_node_dir = self.npm_path.parent().map(|p| p.to_string_lossy().into_owned());
+        let mut path_parts: Vec<String> = Vec::new();
+        if let Some(d) = &bundled_node_dir {
+            if !existing_path.contains(d.as_str()) {
+                path_parts.push(d.clone());
+            }
+        }
+        path_parts.push(existing_path);
+        cmd.env("PATH", path_parts.join(sep));
+
+        #[cfg(windows)]
+        {
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let started = std::time::Instant::now();
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("spawn npm install: {}", e))?;
+
+        // Pipe live output to supervisor log so the user can see progress.
+        let app_clone = app.clone();
+        let this = self.clone();
+        if let Some(out) = child.stdout.take() {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(out);
+                for line in reader.lines().flatten() {
+                    this.record_log(&app_clone, "npm-install", "stdout", &line);
+                }
+            });
+        }
+        let app_clone = app.clone();
+        let this = self.clone();
+        if let Some(err) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(err);
+                for line in reader.lines().flatten() {
+                    this.record_log(&app_clone, "npm-install", "stderr", &line);
+                }
+            });
+        }
+
+        let status = child
+            .wait()
+            .map_err(|e| format!("wait npm install: {}", e))?;
+        let elapsed = started.elapsed().as_secs();
+        if !status.success() {
+            return Err(format!(
+                "npm install exited with code {:?} after {}s — check supervisor.log for the npm output",
+                status.code(),
+                elapsed,
+            ));
+        }
+        // Re-check the marker — npm install can return 0 yet still skip
+        // workspace linking in some edge cases. Fail loudly if so.
+        if !marker.exists() {
+            return Err(format!(
+                "npm install exited 0 but workspace marker still missing at {} — \
+                 the workspace junctions weren't created. Try deleting \
+                 {}\\node_modules and re-launching, or contact support.",
+                marker.display(),
+                self.repo_root.display(),
+            ));
+        }
+        self.record_log(app, "supervisor", "stdout",
+            &format!("✓ Workspaces installed in {}s. Continuing with staged boot.", elapsed));
+        Ok(())
     }
 
     pub fn start_one(self: &Arc<Self>, app: &AppHandle, def: &ServiceDef) {

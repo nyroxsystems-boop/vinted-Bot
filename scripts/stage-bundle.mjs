@@ -181,6 +181,42 @@ if (installResult.status !== 0) {
 }
 log('  npm install complete');
 
+// Sanity check: did npm actually create the @vinted-system/* workspace
+// junctions? On Windows CI runners we've seen npm exit 0 yet skip the
+// junction creation (or the WiX bundler downstream strips them). Either
+// way, an installer shipped without these links boots into a 5-second
+// ERR_MODULE_NOT_FOUND crash-loop nobody can debug. Fail the CI build
+// loudly here instead of shipping a broken bundle. The supervisor still
+// has a runtime self-heal as a belt-and-braces fallback (see
+// services.rs::self_heal_workspaces_if_needed) for cases where Tauri's
+// bundler drops the junctions even though stage-bundle saw them.
+const requiredWorkspaces = ['shared', 'orchestrator', 'vinted-bot', 'cj-service'];
+const missingWorkspaces = [];
+for (const ws of requiredWorkspaces) {
+  const linkPath = path.join(SYSTEM_DEST, 'node_modules', '@vinted-system', ws);
+  // Use lstat to detect junctions/symlinks; existsSync follows symlinks
+  // and could miss broken ones.
+  if (!fs.existsSync(linkPath)) {
+    missingWorkspaces.push(ws);
+  }
+}
+if (missingWorkspaces.length) {
+  console.error(`[stage-bundle] FATAL: npm install exited 0 but these workspace links are missing:`);
+  for (const ws of missingWorkspaces) {
+    console.error(`  - node_modules/@vinted-system/${ws}`);
+  }
+  console.error(`[stage-bundle] The installer would ship broken. Investigate npm workspace handling on this runner.`);
+  console.error(`[stage-bundle] node_modules/@vinted-system/ contents:`);
+  const dir = path.join(SYSTEM_DEST, 'node_modules', '@vinted-system');
+  if (fs.existsSync(dir)) {
+    for (const e of fs.readdirSync(dir)) console.error(`    ${e}`);
+  } else {
+    console.error('    (directory does not exist at all)');
+  }
+  process.exit(1);
+}
+log(`  workspace links verified: ${requiredWorkspaces.join(', ')}`);
+
 // ── 5. Download Playwright Chromium ─────────────────────────────────────────
 log('Downloading Playwright Chromium…');
 await fsp.mkdir(BROWSERS_DEST, { recursive: true });
