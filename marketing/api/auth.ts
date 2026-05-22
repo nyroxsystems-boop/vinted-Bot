@@ -183,6 +183,24 @@ export function ensureAuthSchema(db: Database.Database) {
     const r = db.prepare(`UPDATE users SET is_admin = 1 WHERE email IN (${ph}) AND is_admin = 0`).run(...adminEmails);
     if (r.changes > 0) console.log(`[auth] promoted ${r.changes} user(s) to admin via ADMIN_EMAILS`);
   }
+
+  // First-user-is-admin fallback: if no admins exist yet AND a user with
+  // id=1 is present, promote them. This is the "owner of the deployment"
+  // pattern — whoever registered first on a fresh install owns it. Safe
+  // for single-tenant self-hosted deploys (where blackruby.de runs). On a
+  // multi-tenant SaaS we'd skip this; right now Blackruby is single-tenant.
+  //
+  // Idempotent: once at least one admin exists this branch is a no-op.
+  const anyAdmin = db.prepare(`SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1`).get();
+  if (!anyAdmin) {
+    const firstUser = db.prepare(`SELECT id, email FROM users WHERE id = 1`).get() as
+      | { id: number; email: string }
+      | undefined;
+    if (firstUser) {
+      db.prepare(`UPDATE users SET is_admin = 1 WHERE id = ?`).run(firstUser.id);
+      console.log(`[auth] bootstrapped user_id=1 (${firstUser.email}) as admin — no other admins existed`);
+    }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
