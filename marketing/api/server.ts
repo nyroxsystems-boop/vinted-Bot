@@ -33,10 +33,13 @@ import {
   makeAuthMiddleware,
   requireAuth,
   findUserByEmail,
+  findUserById,
   createUser,
   bindLicensesToUser,
   issueSession,
   clearSessionCookie,
+  createPairCode,
+  consumePairCode,
   type AuthedRequest,
 } from './auth.js';
 import { sendLicenseEmail, sendWelcomeEmail, sendPasswordResetEmail } from './mail.js';
@@ -1071,20 +1074,24 @@ app.post('/api/license/refund', async (req: Request, res: Response) => {
 // signature is HMAC-SHA256(payload, LICENSE_SIGNING_SECRET) so the app can
 // verify integrity even when offline (signature is checked against the
 // embedded public-half of the secret in the Tauri build).
-app.post('/api/desktop/session', async (req: Request, res: Response) => {
-  const { email, password, machine_id } = req.body as {
-    email?: string;
-    password?: string;
-    machine_id?: string;
-  };
-  if (!email || !password) return res.status(400).json({ ok: false, error: 'invalid_input' });
-
-  const user = findUserByEmail(db, email);
-  if (!user) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
-  const ok = await verifyPassword(password, user.password_hash);
-  if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
-
-  // Pull licenses bound to this user (or matchable by email).
+/**
+ * Issue a signed desktop session for an already-verified user. Shared by
+ * the email/password route and the device-code pair-complete route. The
+ * caller is responsible for AUTHENTICATING the user — this function ONLY
+ * checks subscription status and emits the signed payload.
+ *
+ * Returns either a 200-shaped { ok:true, payload, signature, ttl_sec }
+ * or a 403 { ok:false, error:'no_subscription', user:{id,email} } when the
+ * user has no licence row.
+ */
+async function issueDesktopSession(
+  req: Request,
+  user: { id: number; email: string },
+  machineId: string | null,
+): Promise<
+  | { status: 200; body: { ok: true; payload: string; signature: string; ttl_sec: number } }
+  | { status: 403; body: { ok: false; error: 'no_subscription'; user: { id: number; email: string } } }
+> {
   bindLicensesToUser(db, user.id, user.email);
   const lic = db
     .prepare(
@@ -1098,10 +1105,17 @@ app.post('/api/desktop/session', async (req: Request, res: Response) => {
       | { key: string; tier: string; cadence: string; status: string; stripe_sub: string | null; expires_at: string | null }
       | undefined;
 
+  if (!lic) {
+    return {
+      status: 403,
+      body: { ok: false, error: 'no_subscription', user: { id: user.id, email: user.email } },
+    };
+  }
+
   // Optional live Stripe check — keeps us honest if a webhook was missed.
-  let effectiveStatus: 'active' | 'cancelled' | 'expired' = (lic?.status as never) ?? 'expired';
-  let effectiveExpiresAt: string | null = lic?.expires_at ?? null;
-  if (!MOCK_MODE && stripe && lic?.stripe_sub) {
+  let effectiveStatus: 'active' | 'cancelled' | 'expired' = (lic.status as never) ?? 'expired';
+  let effectiveExpiresAt: string | null = lic.expires_at ?? null;
+  if (!MOCK_MODE && stripe && lic.stripe_sub) {
     try {
       const sub = await stripe.subscriptions.retrieve(lic.stripe_sub);
       const live: ReadonlyArray<Stripe.Subscription.Status> = ['active', 'trialing'];
@@ -1116,16 +1130,10 @@ app.post('/api/desktop/session', async (req: Request, res: Response) => {
     }
   }
 
-  // 'member' is the single boolean the app cares about. cancelled-but-not-yet-
-  // expired keeps the customer running until expires_at (paid through period).
   const now = new Date();
   const member =
     effectiveStatus === 'active' ||
     (effectiveStatus === 'cancelled' && effectiveExpiresAt && new Date(effectiveExpiresAt) > now);
-
-  if (!lic) {
-    return res.status(403).json({ ok: false, error: 'no_subscription', user: { id: user.id, email: user.email } });
-  }
 
   const payload = {
     user_id: user.id,
@@ -1134,7 +1142,7 @@ app.post('/api/desktop/session', async (req: Request, res: Response) => {
     status: effectiveStatus,
     member,
     expires_at: effectiveExpiresAt,
-    machine_id: machine_id ?? null,
+    machine_id: machineId,
     issued_at: now.toISOString(),
   };
   const payloadStr = JSON.stringify(payload);
@@ -1150,18 +1158,85 @@ app.post('/api/desktop/session', async (req: Request, res: Response) => {
     const ipHash = rawIp ? createHmac('sha256', LICENSE_SIGNING_SECRET).update(rawIp).digest('hex').slice(0, 16) : null;
     const userAgent = (req.headers['user-agent'] as string | undefined)?.slice(0, 200) ?? null;
     db.prepare(`INSERT INTO desktop_logins (user_id, machine_id, ip_hash, user_agent) VALUES (?, ?, ?, ?)`)
-      .run(user.id, machine_id ?? null, ipHash, userAgent);
+      .run(user.id, machineId, ipHash, userAgent);
   } catch (e) {
-    // Audit failure must not block login — just log.
     console.warn('[desktop/session] audit insert failed:', e);
   }
 
-  res.json({
-    ok: true,
-    payload: payloadStr,
-    signature,
-    ttl_sec: 60 * 60 * 6, // 6h — app re-validates every 6 hours when online
-  });
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      payload: payloadStr,
+      signature,
+      ttl_sec: 60 * 60 * 6, // 6h — app re-validates every 6 hours when online
+    },
+  };
+}
+
+app.post('/api/desktop/session', async (req: Request, res: Response) => {
+  const { email, password, machine_id } = req.body as {
+    email?: string;
+    password?: string;
+    machine_id?: string;
+  };
+  if (!email || !password) return res.status(400).json({ ok: false, error: 'invalid_input' });
+
+  const user = findUserByEmail(db, email);
+  if (!user) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+
+  const result = await issueDesktopSession(req, { id: user.id, email: user.email }, machine_id ?? null);
+  res.status(result.status).json(result.body);
+});
+
+// ── Desktop pairing (Google / Apple / external-IdP fallback) ────────────────
+// The Tauri webview can't host Google's OAuth iframe (tauri:// isn't an
+// authorised origin), so Google-signed-up users use the device-code flow:
+//   1. Log in to blackruby.de via Google in the regular browser
+//   2. Click "Verbinde Desktop App" in the member area → POST /pair-start
+//   3. Page shows a 6-char code (valid 10 min, single-use)
+//   4. Type the code into the desktop app → POST /pair-complete → signed session
+//
+// POST /api/desktop/pair-start  (authed)
+//   200 → { ok:true, code:"AB3F7K", expires_at:"…", ttl_sec:600 }
+app.post('/api/desktop/pair-start', requireAuth, (req: AuthedRequest, res: Response) => {
+  // requireAuth already ensured req.user is set.
+  const u = req.user!;
+  const row = createPairCode(db, u.id);
+  const ttlSec = Math.max(
+    0,
+    Math.floor((new Date(row.expires_at).getTime() - Date.now()) / 1000),
+  );
+  res.json({ ok: true, code: row.code, expires_at: row.expires_at, ttl_sec: ttlSec });
+});
+
+// POST /api/desktop/pair-complete  (NOT authed — the desktop has no cookie)
+//   body: { code, machine_id? }
+//   200 → same shape as /api/desktop/session
+//   401 → { ok:false, error:'invalid_code' } on unknown/expired/consumed
+//   403 → { ok:false, error:'no_subscription', user } when no licence row
+app.post('/api/desktop/pair-complete', async (req: Request, res: Response) => {
+  const { code, machine_id } = req.body as { code?: string; machine_id?: string };
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ ok: false, error: 'invalid_input' });
+  }
+  const userId = consumePairCode(db, code);
+  if (userId === null) {
+    return res.status(401).json({ ok: false, error: 'invalid_code' });
+  }
+  const user = findUserById(db, userId);
+  if (!user) {
+    // Should be impossible (FK + cascade) but be defensive.
+    return res.status(401).json({ ok: false, error: 'invalid_code' });
+  }
+  const result = await issueDesktopSession(
+    req,
+    { id: user.id, email: user.email },
+    machine_id ?? null,
+  );
+  res.status(result.status).json(result.body);
 });
 
 // POST /api/desktop/refresh — same shape, used by the app on a schedule.

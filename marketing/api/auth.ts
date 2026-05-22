@@ -99,6 +99,23 @@ export function ensureAuthSchema(db: Database.Database) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_desktop_logins_user ON desktop_logins(user_id, created_at);
+
+    -- Short-lived pairing codes for the desktop app. The desktop webview
+    -- can't run Google's OAuth iframe (tauri:// is not an authorised
+    -- origin), so users who signed up via Google use this device-code
+    -- flow instead: log in on blackruby.de/members, click "Verbinde
+    -- Desktop", get a 6-char code, type it into the app. The code maps
+    -- to a user_id and expires after 10 minutes; consumed flag prevents
+    -- replay even if the code leaks before expiry.
+    CREATE TABLE IF NOT EXISTS desktop_pair_codes (
+      code        TEXT PRIMARY KEY,
+      user_id     INTEGER NOT NULL,
+      expires_at  TEXT NOT NULL,
+      consumed_at TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pair_codes_user ON desktop_pair_codes(user_id, created_at);
   `);
 
   // Tag the licenses table with user_id if missing — backwards-compatible
@@ -242,6 +259,77 @@ export function bindLicensesToUser(db: Database.Database, userId: number, email:
     userId,
     email.toLowerCase(),
   );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Desktop pair codes — short-lived link between an authenticated web session
+// and a desktop install. See the table comment in ensureAuthSchema for the
+// flow. Codes are 6 alphanumeric chars (no I/O/0/1 to avoid look-alike pairs).
+// ──────────────────────────────────────────────────────────────────────────────
+
+const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function randomPairCode(): string {
+  const buf = new Uint8Array(6);
+  // Web Crypto is available in Node 18+ via the global `crypto` object.
+  (globalThis.crypto as Crypto).getRandomValues(buf);
+  let out = '';
+  for (const b of buf) out += PAIR_ALPHABET[b % PAIR_ALPHABET.length];
+  return out;
+}
+
+export interface PairCodeRow {
+  code: string;
+  user_id: number;
+  expires_at: string;
+  consumed_at: string | null;
+}
+
+const PAIR_TTL_MIN = 10;
+
+/** Create a new pair code for `userId`. Invalidates any previously-issued
+ *  un-consumed codes for the same user so only one is active at a time. */
+export function createPairCode(db: Database.Database, userId: number): PairCodeRow {
+  // Mark prior un-consumed codes as consumed (silently expire them) so
+  // anyone watching for "your code is X" can't reuse a stale one.
+  db.prepare(
+    `UPDATE desktop_pair_codes SET consumed_at = datetime('now')
+       WHERE user_id = ? AND consumed_at IS NULL AND datetime(expires_at) > datetime('now')`,
+  ).run(userId);
+  // Retry on the astronomically-rare collision (32^6 ≈ 1 in 10^9 per user).
+  for (let i = 0; i < 5; i++) {
+    const code = randomPairCode();
+    const expiresAt = new Date(Date.now() + PAIR_TTL_MIN * 60_000).toISOString();
+    try {
+      db.prepare(
+        `INSERT INTO desktop_pair_codes (code, user_id, expires_at) VALUES (?, ?, ?)`,
+      ).run(code, userId, expiresAt);
+      return { code, user_id: userId, expires_at: expiresAt, consumed_at: null };
+    } catch (e) {
+      // SQLITE_CONSTRAINT_PRIMARYKEY → retry
+      if (!String(e).includes('UNIQUE')) throw e;
+    }
+  }
+  throw new Error('pair-code collision after 5 retries — RNG broken?');
+}
+
+/** Consume a pair code. Returns the associated user_id on success, null on
+ *  unknown/expired/already-consumed. Uses a single UPDATE-with-RETURNING to
+ *  keep the consume operation atomic — no TOCTOU window between SELECT and
+ *  UPDATE that would let two desktop installs race for the same code. */
+export function consumePairCode(db: Database.Database, code: string): number | null {
+  const upper = code.trim().toUpperCase();
+  const row = db
+    .prepare(
+      `UPDATE desktop_pair_codes
+          SET consumed_at = datetime('now')
+        WHERE code = ?
+          AND consumed_at IS NULL
+          AND datetime(expires_at) > datetime('now')
+        RETURNING user_id`,
+    )
+    .get(upper) as { user_id: number } | undefined;
+  return row?.user_id ?? null;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

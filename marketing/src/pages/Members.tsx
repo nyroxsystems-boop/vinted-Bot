@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   KeyRound, Copy, Check, ExternalLink, LogOut, Send, Hash, Sparkles,
-  MessageCircle, CreditCard, Loader2,
+  MessageCircle, CreditCard, Loader2, Monitor, RefreshCw,
 } from 'lucide-react';
 import { Nav } from '../components/Nav';
 import { Footer } from '../components/Footer';
@@ -137,6 +137,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <main className="space-y-6">
               <div className={tab === 'licenses' ? 'block' : 'hidden md:block'}>
                 <LicenseList licenses={licenses} loading={loading} />
+                <DesktopPairPanel />
               </div>
               <div className={tab === 'chat' ? 'block' : 'hidden md:block'}>
                 <ChatPanel channel={channel} currentEmail={email} />
@@ -228,6 +229,140 @@ function AccountCard({ email, licenses }: { email: string; licenses: License[] }
           <Sparkles size={12} /> Lizenz holen
         </Link>
       )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Desktop pairing panel
+//
+// Generates a short-lived 6-char code that the user types into the Tauri
+// app's SessionGate. This is the only way Google-signed-up users can log
+// into the desktop without typing a password (the Tauri webview can't host
+// Google's OAuth iframe — tauri:// isn't an authorised origin).
+// ──────────────────────────────────────────────────────────────────────────────
+function DesktopPairPanel() {
+  const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [remaining, setRemaining] = useState<number>(0);
+
+  // Live ticking countdown — re-renders every second so the user sees the
+  // remaining TTL shrink. When it hits zero, the code is automatically
+  // hidden so nobody types a stale value.
+  useEffect(() => {
+    if (!expiresAt) return;
+    const tick = () => {
+      const secs = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+      setRemaining(secs);
+      if (secs === 0) {
+        setCode(null);
+        setExpiresAt(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      const r = await fetch('/api/desktop/pair-start', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error ?? 'failed');
+      setCode(data.code);
+      setExpiresAt(data.expires_at);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyCode() {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard rejected (rare) — user can still type the code manually.
+    }
+  }
+
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+
+  return (
+    <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+      <div className="flex items-start gap-3">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-rose-500/20 to-indigo-500/20 text-rose-300 ring-1 ring-rose-500/20">
+          <Monitor size={17} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-bold text-white">Desktop-App verbinden</h3>
+          <p className="mt-1 text-sm leading-relaxed text-zinc-400">
+            Wenn du dich mit Google angemeldet hast, klick hier um einen Einmal-Code zu generieren.
+            Den Code gibst du in der Blackruby-App unter <span className="font-mono text-zinc-300">„Code aus Browser"</span> ein —
+            danach ist das Gerät verbunden.
+          </p>
+
+          {!code && (
+            <button
+              type="button"
+              onClick={generate}
+              disabled={busy}
+              className="btn-primary mt-4 inline-flex items-center justify-center gap-2 text-xs"
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+              Code generieren
+            </button>
+          )}
+
+          {code && (
+            <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/[0.06] p-4">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-300/80">
+                Dein Code · gültig {mins}:{String(secs).padStart(2, '0')}
+              </div>
+              <div className="mt-2 flex items-center gap-3">
+                <code className="select-all font-mono text-3xl font-bold tracking-[0.35em] text-white">{code}</code>
+                <button
+                  type="button"
+                  onClick={copyCode}
+                  className="ml-auto inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-zinc-300 transition hover:border-white/20 hover:text-white"
+                  title="Code kopieren"
+                >
+                  {copied ? <Check size={12} className="text-emerald-300" /> : <Copy size={12} />}
+                  {copied ? 'Kopiert' : 'Kopieren'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={generate}
+                disabled={busy}
+                className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-zinc-500 transition hover:text-zinc-300"
+              >
+                <RefreshCw size={11} /> Neuen Code generieren
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-3 text-xs text-rose-300">
+              Fehler beim Generieren: {error}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

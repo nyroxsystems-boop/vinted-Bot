@@ -36,7 +36,12 @@ const SOFT_STALE_MS       = 24 * 60 * 60 * 1000; // soft banner after 24 h
 
 interface StoredSession {
   email: string;
-  password: string;            // TODO: move to OS keychain
+  // Password is only set for email/password logins. Code-paired sessions
+  // (Google users who logged in via a pair-code from /members) leave this
+  // null — they can't be silently re-validated against the server because
+  // we never had their password. Those sessions ride the offline-grace
+  // window (96 h) and prompt for a fresh code after that.
+  password: string | null;
   payload: string;             // raw JSON string signed by server
   signature: string;           // hex HMAC-SHA256
   tier: 'starter' | 'hustler';
@@ -62,6 +67,7 @@ export interface Session {
 interface SessionCtx {
   license: Session | null;
   activate: (key: string, password?: string) => Promise<LoginResult>;
+  activateWithCode: (code: string) => Promise<LoginResult>;
   deactivate: () => void;
   softStale: boolean;
 }
@@ -69,6 +75,7 @@ interface SessionCtx {
 const Ctx = createContext<SessionCtx>({
   license: null,
   activate: async () => ({ ok: false, error: 'not initialised' }),
+  activateWithCode: async () => ({ ok: false, error: 'not initialised' }),
   deactivate: () => undefined,
   softStale: false,
 });
@@ -93,9 +100,14 @@ export function SessionProvider({
     setHydrated(true);
     if (!stored) return;
 
+    // Code-paired sessions can't be silently re-validated (no password). They
+    // ride the offline-grace window — when it expires, the SessionGate shows
+    // 'offline_stale' and the user generates a fresh code in /members.
+    if (!stored.password) return;
+
     let cancelled = false;
     const runCheck = () => {
-      if (cancelled || !stored) return;
+      if (cancelled || !stored || !stored.password) return;
       void revalidate(stored.email, stored.password).then((res) => {
         if (cancelled) return;
         if (res.ok) {
@@ -146,6 +158,22 @@ export function SessionProvider({
     return { ok: false, error: res.error, reason: res.reason };
   }
 
+  // Code-pair login — for users who signed up via Google and can't type
+  // a password into the desktop. They generated a 6-char code at
+  // blackruby.de/members and entered it here.
+  async function activateWithCode(code: string): Promise<LoginResult> {
+    const cleaned = code.trim().toUpperCase();
+    if (!cleaned) {
+      return { ok: false, error: 'Code fehlt.', reason: 'invalid_credentials' };
+    }
+    const res = await consumePairCode(cleaned);
+    if (res.ok) {
+      persist(res.session);
+      return { ok: true };
+    }
+    return { ok: false, error: res.error, reason: res.reason };
+  }
+
   if (!hydrated) return null;
 
   const expired = stored ? sessionExpired(stored) : false;
@@ -156,6 +184,7 @@ export function SessionProvider({
     return (
       <SessionGate
         onLogin={activate}
+        onLoginWithCode={activateWithCode}
         previousEmail={stored?.email}
         reason={reason}
       />
@@ -167,6 +196,7 @@ export function SessionProvider({
   const ctx: SessionCtx = {
     license: stored ? toSession(stored) : null,
     activate,
+    activateWithCode,
     deactivate,
     softStale,
   };
@@ -205,9 +235,20 @@ function loadStored(): StoredSession | null {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredSession;
-    if (!parsed.email || !parsed.password || !parsed.signature) return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<StoredSession>;
+    // password is optional (code-paired sessions don't store one), but
+    // email + signature are required to reconstruct a session.
+    if (!parsed.email || !parsed.signature || !parsed.payload) return null;
+    return {
+      email: parsed.email,
+      password: parsed.password ?? null,
+      payload: parsed.payload,
+      signature: parsed.signature,
+      tier: parsed.tier ?? 'hustler',
+      status: parsed.status ?? 'active',
+      expires_at: parsed.expires_at ?? null,
+      last_validated_at: parsed.last_validated_at ?? new Date().toISOString(),
+    };
   } catch {
     return null;
   }
@@ -325,4 +366,87 @@ function getMachineId(): string {
     localStorage.setItem('br_machine_id', id);
   }
   return id;
+}
+
+/**
+ * Exchange a pair-code (generated at blackruby.de/members) for a signed
+ * desktop session. Mirrors revalidate() but uses a different endpoint and
+ * stores no password — the resulting session can't be silently re-checked
+ * and lives only as long as the offline-grace window.
+ */
+async function consumePairCode(
+  code: string,
+): Promise<
+  | { ok: true; session: StoredSession }
+  | { ok: false; error: string; reason?: LoginFailReason }
+> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10_000);
+    const r = await fetch(`${SESSION_API_URL}/api/desktop/pair-complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, machine_id: getMachineId() }),
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
+
+    if (r.status === 401) {
+      return { ok: false, error: 'Code unbekannt oder abgelaufen.', reason: 'invalid_credentials' };
+    }
+    if (r.status === 403) {
+      return { ok: false, error: 'Account hat kein aktives Abo.', reason: 'no_subscription' };
+    }
+    if (!r.ok) {
+      return { ok: false, error: `Server-Fehler ${r.status}.` };
+    }
+
+    const data = (await r.json()) as {
+      ok: boolean;
+      payload?: string;
+      signature?: string;
+      error?: string;
+    };
+    if (!data.ok || !data.payload || !data.signature) {
+      return { ok: false, error: data.error ?? 'Ungültige Server-Antwort.' };
+    }
+    const sigOk = await verifyLicenseSignature(data.payload, data.signature);
+    if (!sigOk) {
+      return { ok: false, error: 'Signaturprüfung fehlgeschlagen.' };
+    }
+    let payloadObj: {
+      email?: string;
+      tier?: 'starter' | 'hustler';
+      status?: 'active' | 'cancelled' | 'expired';
+      member?: boolean;
+      expires_at?: string | null;
+    } = {};
+    try { payloadObj = JSON.parse(data.payload); } catch { /* */ }
+
+    if (payloadObj.member === false || !payloadObj.email) {
+      return { ok: false, error: 'Kein aktives Abo auf diesem Account.', reason: 'no_subscription' };
+    }
+
+    return {
+      ok: true,
+      session: {
+        email: payloadObj.email,
+        password: null,       // code-paired — no password stored
+        payload: data.payload,
+        signature: data.signature,
+        tier: payloadObj.tier ?? 'hustler',
+        status: payloadObj.status ?? 'active',
+        expires_at: payloadObj.expires_at ?? null,
+        last_validated_at: new Date().toISOString(),
+      },
+    };
+  } catch (e) {
+    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'aborted')) {
+      return { ok: false, error: `${SESSION_API_URL} antwortet nicht.` };
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('network')) {
+      return { ok: false, error: `Keine Verbindung zu ${SESSION_API_URL}.` };
+    }
+    return { ok: false, error: msg };
+  }
 }
